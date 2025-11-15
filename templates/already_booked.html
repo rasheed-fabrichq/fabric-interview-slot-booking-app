@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Already Booked{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header bg-warning text-dark">
+                <h3 class="mb-0">Booking Confirmed</h3>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-warning">
+                    <h5>You have booked your interview slot.</h5>
+                </div>
+
+                <div class="mb-4">
+                    <h5>Your Details:</h5>
+                    <p><strong>Name:</strong> {{ candidate.name }}</p>
+                    <p><strong>Email:</strong> {{ candidate.email }}</p>
+                </div>
+
+                {% if booking %}
+                <div class="card bg-light">
+                    <div class="card-body">
+                        <h5 class="card-title">Your Booked Slot:</h5>
+                        <p><strong>College:</strong> {{ booking.college_name }}</p>
+                        <p><strong>Interview Day:</strong> {{ booking.day }}</p>
+                        <p><strong>Date:</strong> {{ booking.date }}</p>
+                        <p><strong>Time:</strong> {{ booking.start_time_formatted }} - {{ booking.end_time_formatted }}</p>
+                        <p><strong>Duration:</strong> 30 minutes</p>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="alert alert-info mt-4">
+                    <strong>Note:</strong> You cannot make changes to your booking. 
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

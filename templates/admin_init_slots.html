@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Initialize Slots{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Initialize Interview Slots</h2>
+            <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Initialize Slots</h5>
+            </div>
+            <div class="card-body">
+                {% if success %}
+                <div class="alert alert-success">{{ success }}</div>
+                {% endif %}
+
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+
+                <div class="alert alert-info">
+                    <strong>Interview Schedule:</strong>
+                    <ul class="mb-0">
+                        {% for day, date in interview_dates.items() %}
+                        <li><strong>{{ day }}:</strong> {{ date }}</li>
+                        {% endfor %}
+                    </ul>
+                    <p class="mt-2 mb-0">
+                        <strong>Total slots per day:</strong> 48 (00:00 to 23:30, 30-minute intervals)<br>
+                        <strong>Capacity per slot:</strong> 10 candidates (shared across all colleges)
+                    </p>
+                </div>
+
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <p>Click the button below to initialize all time slots for both interview days.</p>
+                    <button type="submit" class="btn btn-primary btn-lg">Initialize Slots</button>
+                </form>
+
+                <hr>
+
+                <form method="POST" action="/admin/clear-slots">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <p class="text-danger"><strong>Danger Zone:</strong> Clear all existing slots (this will reset all bookings)</p>
+                    <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will delete all slots and bookings!')">Clear All Slots</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

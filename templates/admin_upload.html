@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Candidates{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Upload Candidates</h2>
+            <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Upload Candidate List</h5>
+            </div>
+            <div class="card-body">
+                {% if success %}
+                <div class="alert alert-success">{{ success }}</div>
+                {% endif %}
+
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+
+                {% if errors %}
+                <div class="alert alert-warning">
+                    <strong>Validation Errors (showing first 50):</strong>
+                    <div style="max-height: 400px; overflow-y: auto; margin-top: 10px; padding: 10px; background-color: #fff; border: 1px solid #ddd; border-radius: 4px;">
+                        <ul class="mb-0" style="font-family: monospace; font-size: 0.85rem;">
+                            {% for err in errors %}
+                            <li style="margin-bottom: 8px; word-wrap: break-word;">{{ err }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    <p class="mt-2 mb-0 text-muted"><small>Tip: Copy errors to fix them in your file, then re-upload.</small></p>
+                </div>
+                {% endif %}
+
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">Select CSV or Excel File</label>
+                        <input type="file" class="form-control" id="file" name="file" accept=".csv,.xlsx,.xls" required>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <strong>File Requirements:</strong>
+                        <ul class="mb-0">
+                            <li>Format: CSV or Excel (.xlsx, .xls)</li>
+                            <li>Required columns: <code>candidate_id</code>, <code>name</code>, <code>email</code></li>
+                            <li>candidate_id must be a UUID</li>
+                        </ul>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Upload</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0">Sample CSV Format</h5>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded">candidate_id,name,email
+7f3e9a2c-4b1d-4f8e...,John Doe,john@iitb.ac.in
+8a4f0b3d-5c2e-5g9f...,Jane Smith,jane@iitd.ac.in</pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

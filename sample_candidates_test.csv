@@ -1,0 +1,11 @@
+candidate_id,name,email,college_name,interview_link
+550e8400-e29b-41d4-a716-446655440101,John Doe,john.doe@iitb.ac.in,IIT Bombay,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440101
+550e8400-e29b-41d4-a716-446655440102,Jane Smith,jane.smith@iitd.ac.in,IIT Delhi,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440102
+550e8400-e29b-41d4-a716-446655440103,Michael Brown,michael.brown@iitm.ac.in,IIT Madras,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440103
+550e8400-e29b-41d4-a716-446655440104,Sarah Wilson,sarah.wilson@iitr.ac.in,IIT Roorkee,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440104
+550e8400-e29b-41d4-a716-446655440105,David Lee,david.lee@iitg.ac.in,IIT Guwahati,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440105
+550e8400-e29b-41d4-a716-446655440106,Emily Chen,emily.chen@iitdhanbad.ac.in,IIT Dhanbad,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440106
+550e8400-e29b-41d4-a716-446655440107,Robert Taylor,robert.taylor@iitkgp.ac.in,IIT Kharagpur (IIT KGP),https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440107
+550e8400-e29b-41d4-a716-446655440108,Lisa Anderson,lisa.anderson@iitbhu.ac.in,IIT BHU,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440108
+550e8400-e29b-41d4-a716-446655440109,James Martinez,james.martinez@iitk.ac.in,IIT Kanpur,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440109
+550e8400-e29b-41d4-a716-446655440110,Maria Garcia,maria.garcia@iitb.ac.in,IIT Bombay,https://app.fabrichq.ai/interview/job123?candidate_id=550e8400-e29b-41d4-a716-446655440110

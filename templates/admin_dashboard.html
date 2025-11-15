@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Admin Dashboard</h2>
+            <a href="/admin/logout" class="btn btn-outline-danger">Logout</a>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Stats -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <h5 class="card-title">Total Candidates</h5>
+                <h2 class="card-text">{{ stats.total_candidates }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <h5 class="card-title">Total Bookings</h5>
+                <h2 class="card-text">{{ stats.total_bookings }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-dark">
+            <div class="card-body">
+                <h5 class="card-title">Clicked</h5>
+                <h2 class="card-text">{{ stats.status_counts.get('clicked', 0) }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body">
+                <h5 class="card-title">Pending</h5>
+                <h2 class="card-text">{{ stats.status_counts.get('pending', 0) }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Booking Control Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card {% if booking_enabled %}border-success{% else %}border-danger{% endif %}">
+            <div class="card-header {% if booking_enabled %}bg-success text-white{% else %}bg-danger text-white{% endif %}">
+                <h5 class="mb-0">
+                    <i class="bi bi-toggle-{% if booking_enabled %}on{% else %}off{% endif %}"></i>
+                    Booking Control
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h6 class="mb-2">Current Status:
+                            {% if booking_enabled %}
+                                <span class="badge bg-success fs-6">Booking Enabled</span>
+                            {% else %}
+                                <span class="badge bg-danger fs-6">Booking Disabled</span>
+                            {% endif %}
+                        </h6>
+                        <p class="text-muted mb-0">
+                            {% if booking_enabled %}
+                                Candidates can currently book interview slots through their booking links.
+                            {% else %}
+                                Booking is currently closed. Candidates will see a "Booking Closed" message.
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <form method="POST" action="/admin/toggle-booking" onsubmit="return confirm('{% if booking_enabled %}Are you sure you want to disable booking? Candidates will not be able to book slots.{% else %}Are you sure you want to enable booking? Candidates will be able to book slots again.{% endif %}');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {% if booking_enabled %}
+                                <input type="hidden" name="action" value="disable">
+                                <button type="submit" class="btn btn-danger btn-lg">
+                                    <i class="bi bi-x-circle"></i> Disable Booking
+                                </button>
+                            {% else %}
+                                <input type="hidden" name="action" value="enable">
+                                <button type="submit" class="btn btn-success btn-lg">
+                                    <i class="bi bi-check-circle"></i> Enable Booking
+                                </button>
+                            {% endif %}
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Day-wise Stats -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Slot Utilization by Day</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Day</th>
+                            <th>Total Bookings</th>
+                            <th>Total Capacity</th>
+                            <th>Utilization</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for day_stat in stats.day_stats %}
+                        <tr>
+                            <td>{{ day_stat.day }}</td>
+                            <td>{{ day_stat.total_booked }}</td>
+                            <td>{{ day_stat.total_capacity }}</td>
+                            <td>
+                                {% set utilization = (day_stat.total_booked / day_stat.total_capacity * 100) | round(1) %}
+                                <div class="progress">
+                                    <div class="progress-bar" role="progressbar" style="width: {{ utilization }}%">
+                                        {{ utilization }}%
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">View Candidates</h5>
+                <p class="card-text">View all uploaded candidates and their details</p>
+                <a href="/admin/candidates" class="btn btn-primary">View Candidates</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Upload Candidates</h5>
+                <p class="card-text">Upload candidate list from CSV/Excel</p>
+                <a href="/admin/upload" class="btn btn-primary">Upload</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Initialize Slots</h5>
+                <p class="card-text">Create time slots for interviews</p>
+                <a href="/admin/init-slots" class="btn btn-primary">Initialize</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">View Bookings</h5>
+                <p class="card-text">View all confirmed bookings</p>
+                <a href="/admin/bookings" class="btn btn-primary">View</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Export Data</h5>
+                <p class="card-text">Download bookings as Excel or CSV</p>
+                <a href="/admin/export?format=xlsx" class="btn btn-success me-2">
+                    <i class="bi bi-file-earmark-excel"></i> Export Excel
+                </a>
+                <a href="/admin/export?format=csv" class="btn btn-outline-success">
+                    <i class="bi bi-file-earmark-text"></i> Export CSV
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

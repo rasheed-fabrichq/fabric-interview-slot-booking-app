@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Book Your Interview Slot{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h3 class="mb-0">Book Your Interview Slot</h3>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <strong>Instructions:</strong> Please choose an available time slot for your interview.
+                </div>
+
+                <!-- Candidate Info (Read-only) -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label"><strong>Name:</strong></label>
+                        <input type="text" class="form-control" value="{{ candidate.name }}" disabled>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><strong>Email:</strong></label>
+                        <input type="email" class="form-control" value="{{ candidate.email }}" disabled>
+                    </div>
+                </div>
+
+                <!-- College Display (Read-only) -->
+                <div class="mb-4">
+                    <label class="form-label"><strong>Your College:</strong></label>
+                    <input type="text" id="college" class="form-control" value="{{ candidate.college_name }}" disabled>
+                </div>
+
+                <!-- Interview Day Display -->
+                <div id="interview-day-info" class="alert alert-success d-none mb-4">
+                    <strong>Interview Day:</strong> <span id="interview-day"></span>
+                </div>
+
+                <!-- Slot Selection -->
+                <div id="slot-container" class="d-none">
+                    <h5 class="mb-3">Available Time Slots:</h5>
+                    <p class="text-muted small">Click on a time slot to select it. Each slot is 30 minutes long.</p>
+
+                    <div id="slots-grid" class="row g-2">
+                        <!-- Slots will be loaded here via JavaScript -->
+                    </div>
+
+                    <div class="mt-4" id="selected-slot-info" style="display: none;">
+                        <div class="alert alert-primary">
+                            <strong>Selected Slot:</strong> <span id="selected-slot-time"></span>
+                        </div>
+                        <button type="button" id="confirm-booking-btn" class="btn btn-success btn-lg">
+                            Confirm Booking
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Loading spinner -->
+                <div id="loading-spinner" class="text-center d-none">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading available slots...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Success Modal -->
+<div class="modal fade" id="successModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">Booking Confirmed!</h5>
+            </div>
+            <div class="modal-body">
+                <p id="success-message"></p>
+                <div class="alert alert-info">
+                    <strong>Start Time:</strong> <span id="modal-start-time"></span><br>
+                    <strong>End Time:</strong> <span id="modal-end-time"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="window.location.reload()">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Error Modal -->
+<div class="modal fade" id="errorModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">Booking Failed</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="error-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<input type="hidden" id="candidate-id" value="{{ candidate.candidate_id }}">
+<input type="hidden" id="booking-token" value="{{ booking_token }}">
+
+<script>
+// Pass college-day mapping to JavaScript
+const COLLEGE_DAY_MAPPING = {{ college_day_mapping | tojson }};
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/booking.js') }}"></script>
+{% endblock %}
