@@ -25,7 +25,8 @@ A Flask-based web application for managing interview slot bookings for multiple 
 - Interview link is parsed to extract:
   - `job_id` from URL path (`/jobs/<JOB_UUID>/`)
   - `candidate_id` from query parameter (`?candidate_id=<UUID>`)
-- Each candidate receives **slot booking link**: `https://slot-booking.fabrichq.ai/book?candidate_id=<UUID>&job_id=<UUID>`
+- Each candidate receives **slot booking link**: `https://slot-booking.fabrichq.ai/book/<job-slug>?c_id=<UUID>`
+  - Example: `https://slot-booking.fabrichq.ai/book/software-development-engineer-i?c_id=abc123...`
 - **Multi-job booking support:**
   - Candidates CAN book slots for MULTIPLE different jobs
   - Candidates CANNOT book multiple slots for the SAME job (enforced by `UNIQUE(candidate_id, job_id)` constraint)
@@ -63,7 +64,11 @@ https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
 
 **Slot Booking Link** (sent to candidates):
 ```
-https://slot-booking.fabrichq.ai/book?candidate_id=<CANDIDATE_UUID>&job_id=<JOB_UUID>
+https://slot-booking.fabrichq.ai/book/<JOB_SLUG>?c_id=<CANDIDATE_UUID>
+```
+Example:
+```
+https://slot-booking.fabrichq.ai/book/software-development-engineer-i?c_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d
 ```
 
 ### 7. Data Export
@@ -258,8 +263,9 @@ fabric-interview-slot-booking-app/
 
 ### Candidate Routes
 
-- `GET /book?candidate_id=<uuid>&job_id=<uuid>` - Booking form
-  - Validates candidate_id and job_id
+- `GET /book/<job_slug>?c_id=<uuid>` - Booking form
+  - Maps job_slug to job_id
+  - Validates candidate_id (c_id parameter) and job_id
   - If status='booked' → show already_booked.html
   - If status='pending' → update to 'clicked'
   - Pre-fill name & email (read-only)
@@ -429,7 +435,7 @@ backToDatesBtn.addEventListener('click', function() {
 8. Export booking data
 
 ### Candidate Flow
-1. Receives slot booking link: `https://slot-booking.fabrichq.ai/book?candidate_id=<UUID>&job_id=<UUID>`
+1. Receives slot booking link: `https://slot-booking.fabrichq.ai/book/<job-slug>?c_id=<UUID>`
 2. Opens link, status updates: 'pending' → 'clicked'
 3. Sees pre-filled name and email (read-only)
 4. **Step 1:** Selects interview date (e.g., "Thursday, 20-11-2025")

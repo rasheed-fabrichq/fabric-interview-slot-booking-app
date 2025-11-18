@@ -203,7 +203,7 @@
 
 #### C1.1: No candidate_id in URL
 **Test Case:**
-- [ ] Access: `http://localhost:5000/book`
+- [ ] Access: `http://localhost:5000/book/software-development-engineer-i` (no c_id parameter)
 
 **Expected Results:**
 - ✓ Shows "Invalid Link" page
@@ -211,17 +211,26 @@
 
 #### C1.2: Invalid candidate_id
 **Test Case:**
-- [ ] Access: `http://localhost:5000/book?candidate_id=invalid-uuid-123`
+- [ ] Access: `http://localhost:5000/book/software-development-engineer-i?c_id=invalid-uuid-123`
 
 **Expected Results:**
 - ✓ Shows "Invalid Link" page
 - ✓ Message: "Invalid booking link. Please check your email for the correct link."
 
-#### C1.3: Malformed UUID
+#### C1.3: Invalid job slug
 **Test Cases:**
-- [ ] `?candidate_id=abc123`
-- [ ] `?candidate_id=`
-- [ ] `?candidate_id=<script>alert('xss')</script>`
+- [ ] Access: `http://localhost:5000/book/invalid-job-slug?c_id=<valid-uuid>`
+- [ ] Access: `http://localhost:5000/book/fake-position?c_id=<valid-uuid>`
+
+**Expected Results:**
+- ✓ Shows "Invalid Link" page
+- ✓ Message: "Invalid job in the link."
+
+#### C1.4: Malformed UUID
+**Test Cases:**
+- [ ] `?c_id=abc123`
+- [ ] `?c_id=`
+- [ ] `?c_id=<script>alert('xss')</script>`
 
 **Expected Results:**
 - ✓ Shows "Invalid Link" page
@@ -233,7 +242,7 @@
 
 **Test Case:**
 - [ ] Upload candidate via admin
-- [ ] Access: `http://localhost:5000/book?candidate_id=<valid-uuid>`
+- [ ] Access: `http://localhost:5000/book/software-development-engineer-i?c_id=<valid-uuid>`
 - [ ] Verify page loads
 - [ ] Check status changed to 'clicked' in database
 

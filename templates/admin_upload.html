@@ -96,13 +96,20 @@
             </div>
             <div class="card-body">
                 <p class="small mb-2"><strong>After uploading candidates, send them slot booking links in this format:</strong></p>
-                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book?candidate_id=<span class="text-primary">CANDIDATE_UUID</span>&job_id=<span class="text-success">JOB_UUID</span></pre>
+                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book/<span class="text-success">JOB_SLUG</span>?c_id=<span class="text-primary">CANDIDATE_UUID</span></pre>
 
                 <p class="small mb-2 mt-3"><strong>Example for Software Development Engineer I:</strong></p>
-                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book?candidate_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d&job_id=e34e8e92-95ff-47f5-8e2f-86baa397c2a0</pre>
+                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book/software-development-engineer-i?c_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d</pre>
+
+                <p class="small mb-2 mt-3"><strong>Job Slugs:</strong></p>
+                <ul class="small">
+                    <li><code>software-development-engineer-i</code></li>
+                    <li><code>data-scientist-i</code></li>
+                    <li><code>senior-associate-business-management</code></li>
+                </ul>
 
                 <div class="alert alert-warning small mt-3 mb-0">
-                    <strong>Note:</strong> The job_id parameter must match the job you selected during upload. Both job_id and candidate_id must be valid UUIDs.
+                    <strong>Note:</strong> The job slug in the URL must match the job you selected during upload. The candidate_id (c_id) must be a valid UUID.
                 </div>
             </div>
         </div>

@@ -26,6 +26,7 @@ from database import (
 )
 from config import (
     JOBS, is_valid_job_id, get_job_name,
+    get_job_id_from_slug, get_job_slug, is_valid_job_slug,
     ADMIN_USERNAME, ADMIN_PASSWORD
 )
 
@@ -167,15 +168,18 @@ def index():
     return render_template('index.html')
 
 
-@app.route('/book')
-def booking_form():
+@app.route('/book/<job_slug>')
+def booking_form(job_slug):
     """Main booking form for candidates"""
     # Check if booking is globally enabled
     if not is_booking_enabled():
         return render_template('booking_closed.html')
 
-    candidate_id = request.args.get('candidate_id')
-    job_id = request.args.get('job_id')
+    # Get candidate_id from query parameter (renamed to c_id)
+    candidate_id = request.args.get('c_id')
+
+    # Map slug to job_id
+    job_id = get_job_id_from_slug(job_slug)
 
     if not candidate_id:
         return render_template('invalid_link.html',
@@ -183,12 +187,12 @@ def booking_form():
 
     if not job_id:
         return render_template('invalid_link.html',
-                             message='Missing job ID in the link.')
+                             message='Invalid job in the link.')
 
-    # Validate job_id
+    # Validate job_id (already validated by slug mapping, but keeping for safety)
     if not is_valid_job_id(job_id):
         return render_template('invalid_link.html',
-                             message='Invalid job ID in the link.')
+                             message='Invalid job in the link.')
 
     # Check if booking is enabled for this specific job
     if not is_booking_enabled_for_job(job_id):

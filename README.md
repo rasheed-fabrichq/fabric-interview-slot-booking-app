@@ -133,7 +133,8 @@ Before running the application, update the following in `config.py`:
 
 4. **Send Booking Links**:
    - Send emails to candidates with their unique booking links:
-   - Format: `http://your-domain.com/book?candidate_id=<their-uuid>`
+   - Format: `http://your-domain.com/book/<job-slug>?c_id=<their-uuid>`
+   - Example: `http://your-domain.com/book/software-development-engineer-i?c_id=abc123...`
 
 5. **Monitor Bookings**:
    - View dashboard for real-time statistics
@@ -207,7 +208,7 @@ interview-booking/
 
 ### Public Routes
 - `GET /` - Home page
-- `GET /book?candidate_id=<uuid>` - Booking form
+- `GET /book/<job-slug>?c_id=<uuid>` - Booking form
 - `POST /book/confirm` - Confirm booking
 - `GET /api/slots?day=<Saturday|Sunday>` - Get available slots
 
