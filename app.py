@@ -22,7 +22,7 @@ from database import (
     get_job_config, get_all_job_configs, update_job_config,
     get_job_dates, add_job_date, delete_job_date,
     is_booking_enabled_for_job, set_job_booking_enabled,
-    get_candidate_booking_for_job
+    get_candidate_booking_for_job, get_all_slots_for_job
 )
 from config import (
     JOBS, is_valid_job_id, get_job_name,
@@ -841,6 +841,45 @@ def admin_candidates():
                          candidates=candidates,
                          jobs=JOBS,
                          selected_job=job_id)
+
+
+@app.route('/admin/slots')
+@admin_required
+def admin_slots():
+    """View all slots with booking statistics for a specific job"""
+    job_id = request.args.get('job_id')  # Required job filter
+
+    if not job_id or not is_valid_job_id(job_id):
+        # If no valid job selected, redirect to dashboard
+        return redirect(url_for('admin_dashboard'))
+
+    # Get all slots for the selected job
+    all_slots = get_all_slots_for_job(job_id)
+
+    # Group slots by date for better display
+    slots_by_date = {}
+    for slot in all_slots:
+        date = slot['date']
+        if date not in slots_by_date:
+            slots_by_date[date] = {
+                'date': date,
+                'day_of_week': slot['day_of_week'],
+                'slots': [],
+                'total_capacity': 0,
+                'total_booked': 0
+            }
+        slots_by_date[date]['slots'].append(slot)
+        slots_by_date[date]['total_capacity'] += slot['max_capacity']
+        slots_by_date[date]['total_booked'] += slot['booked_count']
+
+    # Convert to sorted list
+    dates_data = sorted(slots_by_date.values(), key=lambda x: x['date'])
+
+    return render_template('admin_slots.html',
+                         dates_data=dates_data,
+                         jobs=JOBS,
+                         selected_job=job_id,
+                         job_name=get_job_name(job_id))
 
 
 # Error handlers

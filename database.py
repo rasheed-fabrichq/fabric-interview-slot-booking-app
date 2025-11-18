@@ -580,6 +580,41 @@ def get_slots_by_job_and_date(job_id, date):
     return slots
 
 
+def get_all_slots_for_job(job_id):
+    """Get all slots for a specific job grouped by date with booking statistics"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Get job capacity
+    cursor.execute('''
+        SELECT capacity_per_slot, slot_duration_minutes FROM job_configs WHERE job_id = ?
+    ''', (job_id,))
+
+    config = cursor.fetchone()
+    if not config:
+        conn.close()
+        return []
+
+    max_capacity = config['capacity_per_slot']
+    slot_duration = config['slot_duration_minutes']
+
+    # Get all slots for this job
+    cursor.execute('''
+        SELECT id, job_id, date, day_of_week, start_time, booked_count,
+               ? as max_capacity,
+               (? - booked_count) as available,
+               ? as slot_duration_minutes
+        FROM slots
+        WHERE job_id = ?
+        ORDER BY date, start_time
+    ''', (max_capacity, max_capacity, slot_duration, job_id))
+
+    slots = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    return slots
+
+
 def clear_slots_for_job(job_id):
     """Clear all slots for a specific job"""
     conn = get_db_connection()

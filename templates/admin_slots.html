@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}View Slots - {{ job_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .slot-badge {
+        min-width: 80px;
+        display: inline-block;
+        text-align: center;
+    }
+    .slot-available {
+        background-color: #28a745;
+    }
+    .slot-partial {
+        background-color: #ffc107;
+        color: #000;
+    }
+    .slot-full {
+        background-color: #dc3545;
+    }
+    .date-card {
+        border-left: 4px solid #007bff;
+    }
+    .stats-box {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>View Slots: {{ job_name }}</h2>
+            <div>
+                <!-- Job Selection Dropdown -->
+                <div class="btn-group me-2">
+                    <button type="button" class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
+                        Select Different Job
+                    </button>
+                    <ul class="dropdown-menu">
+                        {% for job_id, job_name in jobs.items() %}
+                        <li>
+                            <a class="dropdown-item {% if job_id == selected_job %}active{% endif %}"
+                               href="/admin/slots?job_id={{ job_id }}">
+                                {{ job_name }}
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <a href="/admin/dashboard" class="btn btn-outline-secondary">Back to Dashboard</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if dates_data %}
+<!-- Overall Statistics -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="stats-box">
+            <h5>Overall Statistics</h5>
+            <div class="row text-center">
+                <div class="col-md-3">
+                    <h3>{{ dates_data|length }}</h3>
+                    <p class="text-muted mb-0">Total Dates</p>
+                </div>
+                <div class="col-md-3">
+                    {% set total_slots_count = namespace(value=0) %}
+                    {% for date_data in dates_data %}
+                        {% set total_slots_count.value = total_slots_count.value + date_data.slots|length %}
+                    {% endfor %}
+                    <h3>{{ total_slots_count.value }}</h3>
+                    <p class="text-muted mb-0">Total Slots</p>
+                </div>
+                <div class="col-md-3">
+                    <h3>{% set total_booked = dates_data|sum(attribute='total_booked') %}{{ total_booked }}</h3>
+                    <p class="text-muted mb-0">Total Booked</p>
+                </div>
+                <div class="col-md-3">
+                    <h3>{% set total_capacity = dates_data|sum(attribute='total_capacity') %}{{ total_capacity }}</h3>
+                    <p class="text-muted mb-0">Total Capacity</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Slots by Date -->
+{% for date_data in dates_data %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow date-card">
+            <div class="card-header bg-primary text-white">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        {{ date_data.day_of_week }}, {{ date_data.date }}
+                    </h5>
+                    <div>
+                        <span class="badge bg-light text-dark">
+                            {{ date_data.total_booked }} / {{ date_data.total_capacity }} booked
+                        </span>
+                        <span class="badge bg-light text-dark">
+                            {% set utilization = (date_data.total_booked / date_data.total_capacity * 100) if date_data.total_capacity > 0 else 0 %}
+                            {{ "%.1f"|format(utilization) }}% utilization
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm">
+                        <thead>
+                            <tr>
+                                <th>Time Slot</th>
+                                <th>Booked Count</th>
+                                <th>Available</th>
+                                <th>Capacity</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for slot in date_data.slots %}
+                            <tr>
+                                <td>
+                                    <strong>{{ slot.start_time }}</strong>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">{{ slot.booked_count }}</span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-success">{{ slot.available }}</span>
+                                </td>
+                                <td>{{ slot.max_capacity }}</td>
+                                <td>
+                                    {% if slot.booked_count == 0 %}
+                                        <span class="badge slot-badge slot-available">Empty</span>
+                                    {% elif slot.available == 0 %}
+                                        <span class="badge slot-badge slot-full">Full</span>
+                                    {% elif slot.available <= 3 %}
+                                        <span class="badge slot-badge slot-partial">Almost Full</span>
+                                    {% else %}
+                                        <span class="badge slot-badge slot-available">Available</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr>
+                                <td><strong>Date Total:</strong></td>
+                                <td><strong>{{ date_data.total_booked }}</strong></td>
+                                <td><strong>{{ date_data.total_capacity - date_data.total_booked }}</strong></td>
+                                <td><strong>{{ date_data.total_capacity }}</strong></td>
+                                <td>
+                                    {% set date_utilization = (date_data.total_booked / date_data.total_capacity * 100) if date_data.total_capacity > 0 else 0 %}
+                                    <span class="badge bg-secondary">{{ "%.1f"|format(date_utilization) }}%</span>
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="row">
+    <div class="col-12">
+        <div class="alert alert-warning">
+            <h5>No Slots Initialized</h5>
+            <p class="mb-0">
+                No slots have been initialized for this job yet.
+                <a href="/admin/init-slots" class="alert-link">Click here to initialize slots</a>.
+            </p>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

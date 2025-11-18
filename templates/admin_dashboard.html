@@ -194,6 +194,29 @@
     <div class="col-md-4 mb-3">
         <div class="card shadow">
             <div class="card-body">
+                <h6 class="card-title">View Slots</h6>
+                <p class="card-text small">Time slots & booking counts</p>
+                <div class="btn-group w-100">
+                    <button type="button" class="btn btn-outline-info btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        Select Job
+                    </button>
+                    <ul class="dropdown-menu">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/slots?job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body">
                 <h6 class="card-title">Export Data</h6>
                 <p class="card-text small">Download as Excel/CSV</p>
                 <a href="/admin/export?format=xlsx" class="btn btn-outline-success btn-sm me-1">
