@@ -792,21 +792,18 @@ def get_dashboard_stats():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get stats per job
+    # Get stats per job - using subqueries to avoid JOIN issues
     cursor.execute('''
         SELECT
             jc.job_id,
             jc.job_name,
             jc.booking_enabled,
-            COUNT(DISTINCT c.id) as total_candidates,
-            COUNT(DISTINCT b.id) as total_bookings,
-            SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending_count,
-            SUM(CASE WHEN c.status = 'clicked' THEN 1 ELSE 0 END) as clicked_count,
-            SUM(CASE WHEN c.status = 'booked' THEN 1 ELSE 0 END) as booked_count
+            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id) as total_candidates,
+            (SELECT COUNT(*) FROM bookings WHERE job_id = jc.job_id) as total_bookings,
+            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id AND status = 'pending') as pending_count,
+            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id AND status = 'clicked') as clicked_count,
+            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id AND status = 'booked') as booked_count
         FROM job_configs jc
-        LEFT JOIN candidates c ON jc.job_id = c.job_id
-        LEFT JOIN bookings b ON jc.job_id = b.job_id
-        GROUP BY jc.job_id, jc.job_name, jc.booking_enabled
         ORDER BY jc.created_at
     ''')
 
