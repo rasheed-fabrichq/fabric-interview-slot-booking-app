@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Job Dates - Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2>Manage Interview Dates</h2>
+            <p class="text-muted">Add or remove interview dates for each job</p>
+        </div>
+    </div>
+
+    {% if success %}
+    <div class="alert alert-success alert-dismissible fade show">
+        {{ success }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="row">
+        {% for job_id, job_name in jobs.items() %}
+        <div class="col-md-4 mb-4">
+            <div class="card shadow">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">{{ job_name }}</h5>
+                </div>
+                <div class="card-body">
+                    <!-- Add Date Form -->
+                    <form method="POST" action="{{ url_for('admin_job_dates') }}" class="mb-3">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="add">
+                        <input type="hidden" name="job_id" value="{{ job_id }}">
+
+                        <div class="mb-2">
+                            <label class="form-label"><strong>Add New Date</strong></label>
+                            <input type="date" name="date" class="form-control" required>
+                        </div>
+                        <button type="submit" class="btn btn-success btn-sm w-100">
+                            <i class="bi bi-plus-circle"></i> Add Date
+                        </button>
+                    </form>
+
+                    <hr>
+
+                    <!-- Current Dates -->
+                    <h6 class="mb-3">Current Dates:</h6>
+                    {% set job_dates = all_dates.get(job_id, []) %}
+                    {% if job_dates %}
+                    <div class="list-group">
+                        {% for date_info in job_dates %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>{{ date_info.day_of_week }}</strong><br>
+                                <small class="text-muted">{{ date_info.date }}</small>
+                            </div>
+                            <form method="POST" action="{{ url_for('admin_job_dates') }}" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="job_id" value="{{ job_id }}">
+                                <input type="hidden" name="date" value="{{ date_info.date }}">
+                                <button type="submit" class="btn btn-danger btn-sm"
+                                        onclick="return confirm('Delete this date? This will also delete all slots for this date.')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning small">
+                        No dates configured yet.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="alert alert-info">
+                <strong>💡 Tip:</strong> Add interview dates before initializing slots.
+                Deleting a date will also delete all associated slots and bookings.
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

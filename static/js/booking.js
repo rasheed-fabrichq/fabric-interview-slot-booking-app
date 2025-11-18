@@ -1,49 +1,136 @@
-// Interview Slot Booking - Frontend JavaScript
+// Multi-Job Interview Slot Booking - Frontend JavaScript
 
+let selectedDate = null;
 let selectedSlotId = null;
 let selectedSlotTime = null;
 
 // Get DOM elements
-const collegeInput = document.getElementById('college');
-const interviewDayInfo = document.getElementById('interview-day-info');
-const interviewDaySpan = document.getElementById('interview-day');
+const datesGrid = document.getElementById('dates-grid');
+const dateSelectionContainer = document.getElementById('date-selection-container');
+const selectedDateInfo = document.getElementById('selected-date-info');
+const selectedDateDisplay = document.getElementById('selected-date-display');
 const slotContainer = document.getElementById('slot-container');
 const slotsGrid = document.getElementById('slots-grid');
 const loadingSpinner = document.getElementById('loading-spinner');
 const selectedSlotInfo = document.getElementById('selected-slot-info');
 const selectedSlotTimeSpan = document.getElementById('selected-slot-time');
 const confirmBookingBtn = document.getElementById('confirm-booking-btn');
+const changeDateBtn = document.getElementById('change-date-btn');
+const backToDatesBtn = document.getElementById('back-to-dates-btn');
 const candidateId = document.getElementById('candidate-id').value;
+const jobId = document.getElementById('job-id').value;
+const jobName = document.getElementById('job-name').value;
 const bookingToken = document.getElementById('booking-token').value;
 
-// Auto-load slots on page load based on candidate's college
+// Auto-load dates on page load
 document.addEventListener('DOMContentLoaded', function() {
-    const candidateCollege = collegeInput.value;
-
-    if (candidateCollege && COLLEGE_DAY_MAPPING) {
-        // Get the interview day for candidate's college
-        const day = COLLEGE_DAY_MAPPING[candidateCollege];
-
-        if (day) {
-            // Show interview day
-            interviewDaySpan.textContent = day;
-            interviewDayInfo.classList.remove('d-none');
-
-            // Load slots for this day
-            loadSlots(day);
-        }
-    }
+    loadDates();
 });
 
-// Function to load available slots
-function loadSlots(day) {
+// Function to load available dates for the job
+function loadDates() {
+    // Show loading spinner
+    loadingSpinner.classList.remove('d-none');
+    datesGrid.innerHTML = '';
+
+    // Fetch dates from API
+    fetch(`/api/job-dates?job_id=${jobId}`)
+        .then(response => response.json())
+        .then(dates => {
+            loadingSpinner.classList.add('d-none');
+            displayDates(dates);
+        })
+        .catch(error => {
+            loadingSpinner.classList.add('d-none');
+            showError('Error loading dates. Please try again.');
+            console.error('Error:', error);
+        });
+}
+
+// Function to display available dates
+function displayDates(dates) {
+    datesGrid.innerHTML = '';
+
+    if (dates.length === 0) {
+        datesGrid.innerHTML = '<div class="col-12"><div class="alert alert-warning">No interview dates available.</div></div>';
+        return;
+    }
+
+    dates.forEach(dateInfo => {
+        const dateCard = createDateCard(dateInfo);
+        datesGrid.appendChild(dateCard);
+    });
+}
+
+// Function to create a date card
+function createDateCard(dateInfo) {
+    const col = document.createElement('div');
+    col.className = 'col-md-6';
+
+    const card = document.createElement('div');
+    card.className = 'card date-card';
+    card.style.cursor = 'pointer';
+    card.onclick = () => selectDate(dateInfo.date, dateInfo.day_of_week);
+
+    card.innerHTML = `
+        <div class="card-body text-center p-3">
+            <h5 class="mb-1">${dateInfo.day_of_week}</h5>
+            <p class="mb-0 text-muted">${dateInfo.date}</p>
+        </div>
+    `;
+
+    col.appendChild(card);
+    return col;
+}
+
+// Function to select a date
+function selectDate(date, dayOfWeek) {
+    selectedDate = date;
+
+    // Hide date selection, show selected date info
+    dateSelectionContainer.classList.add('d-none');
+    selectedDateDisplay.textContent = `${date} (${dayOfWeek})`;
+    selectedDateInfo.classList.remove('d-none');
+
+    // Load slots for selected date
+    loadSlots(jobId, date);
+}
+
+// Event listener for change date button
+// Function to go back to date selection
+function backToDateSelection() {
+    // Reset date selection
+    selectedDate = null;
+    selectedSlotId = null;
+    selectedSlotTime = null;
+
+    // Hide slot container and selected date info
+    slotContainer.classList.add('d-none');
+    selectedDateInfo.classList.add('d-none');
+    selectedSlotInfo.style.display = 'none';
+
+    // Show date selection again
+    dateSelectionContainer.classList.remove('d-none');
+
+    // Clear slots grid
+    slotsGrid.innerHTML = '';
+}
+
+// Event listener for "Change Date" button (shown after slot selection)
+changeDateBtn.addEventListener('click', backToDateSelection);
+
+// Event listener for "Back to Dates" button (shown in slot selection screen)
+backToDatesBtn.addEventListener('click', backToDateSelection);
+
+// Function to load available slots for a specific date
+function loadSlots(jobId, date) {
     // Show loading spinner
     loadingSpinner.classList.remove('d-none');
     slotContainer.classList.add('d-none');
     slotsGrid.innerHTML = '';
 
     // Fetch slots from API
-    fetch(`/api/slots?day=${day}`)
+    fetch(`/api/slots?job_id=${jobId}&date=${date}`)
         .then(response => response.json())
         .then(slots => {
             loadingSpinner.classList.add('d-none');
@@ -62,7 +149,7 @@ function displaySlots(slots) {
 
     if (slots.length === 0) {
         slotContainer.classList.remove('d-none');
-        slotsGrid.innerHTML = '<div class="col-12"><div class="alert alert-warning">No slots available.</div></div>';
+        slotsGrid.innerHTML = '<div class="col-12"><div class="alert alert-warning">No slots available for this date.</div></div>';
         return;
     }
 
@@ -160,6 +247,11 @@ confirmBookingBtn.addEventListener('click', function() {
         return;
     }
 
+    if (!selectedDate) {
+        showError('Please select a date.');
+        return;
+    }
+
     // Disable button to prevent double-click
     confirmBookingBtn.disabled = true;
     confirmBookingBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Booking...';
@@ -172,6 +264,7 @@ confirmBookingBtn.addEventListener('click', function() {
         },
         body: JSON.stringify({
             candidate_id: candidateId,
+            job_id: jobId,
             slot_id: selectedSlotId,
             booking_token: bookingToken
         })
@@ -185,7 +278,7 @@ confirmBookingBtn.addEventListener('click', function() {
     })
     .then(result => {
         if (result.data.success) {
-            showSuccess(result.data.message, result.data.start_time, result.data.end_time);
+            showSuccess(result.data.message, result.data.start_time, result.data.end_time, result.data.job_name);
         } else {
             // Show specific error message from server
             showError(result.data.error || 'Booking failed. Please try again.');
@@ -205,8 +298,9 @@ confirmBookingBtn.addEventListener('click', function() {
 });
 
 // Function to show success modal
-function showSuccess(message, startTime, endTime) {
+function showSuccess(message, startTime, endTime, jobName) {
     document.getElementById('success-message').textContent = message;
+    document.getElementById('modal-job-name').textContent = jobName;
     document.getElementById('modal-start-time').textContent = startTime;
     document.getElementById('modal-end-time').textContent = endTime;
 

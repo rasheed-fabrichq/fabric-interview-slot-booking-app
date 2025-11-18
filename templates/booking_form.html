@@ -11,7 +11,7 @@
             </div>
             <div class="card-body">
                 <div class="alert alert-info">
-                    <strong>Instructions:</strong> Please choose an available time slot for your interview.
+                    <strong>Instructions:</strong> First select an interview date, then choose your preferred time slot.
                 </div>
 
                 <!-- Candidate Info (Read-only) -->
@@ -26,21 +26,35 @@
                     </div>
                 </div>
 
-                <!-- College Display (Read-only) -->
+                <!-- Job Display (Read-only) -->
                 <div class="mb-4">
-                    <label class="form-label"><strong>Your College:</strong></label>
-                    <input type="text" id="college" class="form-control" value="{{ candidate.college_name }}" disabled>
+                    <label class="form-label"><strong>Position:</strong></label>
+                    <input type="text" class="form-control" value="{{ job_name }}" disabled>
                 </div>
 
-                <!-- Interview Day Display -->
-                <div id="interview-day-info" class="alert alert-success d-none mb-4">
-                    <strong>Interview Day:</strong> <span id="interview-day"></span>
+                <!-- Date Selection -->
+                <div id="date-selection-container" class="mb-4">
+                    <h5 class="mb-3">Step 1: Select Interview Date</h5>
+                    <p class="text-muted small">Click on a date to view available time slots for that day.</p>
+                    <div id="dates-grid" class="row g-2">
+                        <!-- Dates will be loaded here via JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Selected Date Display -->
+                <div id="selected-date-info" class="alert alert-success d-none mb-4">
+                    <strong>Selected Date:</strong> <span id="selected-date-display"></span>
                 </div>
 
                 <!-- Slot Selection -->
                 <div id="slot-container" class="d-none">
-                    <h5 class="mb-3">Available Time Slots:</h5>
-                    <p class="text-muted small">Click on a time slot to select it. Each slot is 30 minutes long.</p>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="mb-0">Step 2: Select Time Slot</h5>
+                        <button type="button" id="back-to-dates-btn" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-arrow-left"></i> Back to Dates
+                        </button>
+                    </div>
+                    <p class="text-muted small">Click on a time slot to select it. Green = Available, Yellow = Almost Full, Gray = Full</p>
 
                     <div id="slots-grid" class="row g-2">
                         <!-- Slots will be loaded here via JavaScript -->
@@ -53,6 +67,9 @@
                         <button type="button" id="confirm-booking-btn" class="btn btn-success btn-lg">
                             Confirm Booking
                         </button>
+                        <button type="button" id="change-date-btn" class="btn btn-outline-secondary btn-lg ms-2">
+                            Change Date
+                        </button>
                     </div>
                 </div>
 
@@ -61,7 +78,7 @@
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
-                    <p class="mt-2">Loading available slots...</p>
+                    <p class="mt-2">Loading...</p>
                 </div>
             </div>
         </div>
@@ -78,6 +95,7 @@
             <div class="modal-body">
                 <p id="success-message"></p>
                 <div class="alert alert-info">
+                    <strong>Job:</strong> <span id="modal-job-name"></span><br>
                     <strong>Start Time:</strong> <span id="modal-start-time"></span><br>
                     <strong>End Time:</strong> <span id="modal-end-time"></span>
                 </div>
@@ -107,13 +125,12 @@
     </div>
 </div>
 
+<!-- Hidden inputs for JavaScript -->
 <input type="hidden" id="candidate-id" value="{{ candidate.candidate_id }}">
+<input type="hidden" id="job-id" value="{{ job_id }}">
+<input type="hidden" id="job-name" value="{{ job_name }}">
 <input type="hidden" id="booking-token" value="{{ booking_token }}">
 
-<script>
-// Pass college-day mapping to JavaScript
-const COLLEGE_DAY_MAPPING = {{ college_day_mapping | tojson }};
-</script>
 {% endblock %}
 
 {% block extra_js %}

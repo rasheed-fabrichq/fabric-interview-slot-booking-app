@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Job Configuration - Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2>Job Configuration</h2>
+            <p class="text-muted">Configure slot settings for each job (time range, duration, capacity)</p>
+        </div>
+    </div>
+
+    {% if success %}
+    <div class="alert alert-success alert-dismissible fade show">
+        {{ success }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="row">
+        {% for job_id, job_name in jobs.items() %}
+        {% set config = configs|selectattr('job_id', 'equalto', job_id)|first %}
+        <div class="col-md-4 mb-4">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">{{ job_name }}</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin_job_config') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="job_id" value="{{ job_id }}">
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Slot Start Time</strong></label>
+                            <input type="time" name="start_time" class="form-control"
+                                   value="{{ config.slot_start_time if config else '08:00' }}" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Slot End Time</strong></label>
+                            <input type="time" name="end_time" class="form-control"
+                                   value="{{ config.slot_end_time if config else '00:00' }}" required>
+                            <small class="text-muted">Use 00:00 for midnight (end of day)</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Slot Duration (minutes)</strong></label>
+                            <select name="duration" class="form-select" required>
+                                <option value="15" {% if config and config.slot_duration_minutes == 15 %}selected{% endif %}>15 minutes</option>
+                                <option value="30" {% if config and config.slot_duration_minutes == 30 %}selected{% endif %}>30 minutes</option>
+                                <option value="45" {% if config and config.slot_duration_minutes == 45 %}selected{% endif %}>45 minutes</option>
+                                <option value="60" {% if config and config.slot_duration_minutes == 60 %}selected{% endif %}>60 minutes</option>
+                                <option value="90" {% if config and config.slot_duration_minutes == 90 %}selected{% endif %}>90 minutes</option>
+                                <option value="120" {% if config and config.slot_duration_minutes == 120 %}selected{% endif %}>120 minutes</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Capacity per Slot</strong></label>
+                            <input type="number" name="capacity" class="form-control"
+                                   value="{{ config.capacity_per_slot if config else 10 }}"
+                                   min="1" max="100" required>
+                            <small class="text-muted">Max candidates per slot</small>
+                        </div>
+
+                        {% if config %}
+                        <div class="alert alert-info small">
+                            <strong>Current:</strong> {{ config.slot_duration_minutes }} min slots, capacity {{ config.capacity_per_slot }}
+                        </div>
+                        {% endif %}
+
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-save"></i> Update Configuration
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="alert alert-warning">
+                <strong>⚠️ Warning:</strong> Changing configuration will not affect already initialized slots.
+                Clear and re-initialize slots after changing configuration.
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

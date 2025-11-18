@@ -6,12 +6,12 @@
 <div class="row justify-content-center">
     <div class="col-md-8">
         <div class="card shadow">
-            <div class="card-header bg-warning text-dark">
-                <h3 class="mb-0">Booking Confirmed</h3>
+            <div class="card-header bg-success text-white">
+                <h3 class="mb-0">✓ Booking Confirmed</h3>
             </div>
             <div class="card-body">
-                <div class="alert alert-warning">
-                    <h5>You have booked your interview slot.</h5>
+                <div class="alert alert-success">
+                    <h5>Your interview slot has been successfully booked!</h5>
                 </div>
 
                 <div class="mb-4">
@@ -24,17 +24,20 @@
                 <div class="card bg-light">
                     <div class="card-body">
                         <h5 class="card-title">Your Booked Slot:</h5>
-                        <p><strong>College:</strong> {{ booking.college_name }}</p>
-                        <p><strong>Interview Day:</strong> {{ booking.day }}</p>
+                        <p><strong>Position:</strong> {{ booking.job_name }}</p>
+                        <p><strong>Interview Day:</strong> {{ booking.day_of_week }}</p>
                         <p><strong>Date:</strong> {{ booking.date }}</p>
                         <p><strong>Time:</strong> {{ booking.start_time_formatted }} - {{ booking.end_time_formatted }}</p>
-                        <p><strong>Duration:</strong> 30 minutes</p>
                     </div>
                 </div>
                 {% endif %}
 
                 <div class="alert alert-info mt-4">
-                    <strong>Note:</strong> You cannot make changes to your booking. 
+                    <strong>Note:</strong> You have already booked a slot for this position. You cannot make changes to your booking.
+                    {% if candidate.job_id != 'all_jobs' %}
+                    <br><br>
+                    <strong>Tip:</strong> If you were invited for other positions, you will receive separate booking links for each.
+                    {% endif %}
                 </div>
             </div>
         </div>

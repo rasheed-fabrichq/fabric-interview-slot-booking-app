@@ -14,6 +14,21 @@ main {
     margin-top: auto;
 }
 
+/* Date Card Styles */
+.date-card {
+    transition: all 0.3s ease;
+    border: 2px solid #007bff;
+    margin-bottom: 10px;
+    background-color: #f8f9fa;
+}
+
+.date-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0, 123, 255, 0.3);
+    border-color: #0056b3;
+    background-color: #e7f3ff;
+}
+
 /* Slot Card Styles */
 .slot-card {
     transition: all 0.3s ease;

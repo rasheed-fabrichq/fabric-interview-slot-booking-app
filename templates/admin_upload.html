@@ -43,8 +43,20 @@
 
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
                     <div class="mb-3">
-                        <label for="file" class="form-label">Select CSV or Excel File</label>
+                        <label for="job_id" class="form-label"><strong>Select Job Position</strong></label>
+                        <select class="form-select" id="job_id" name="job_id" required>
+                            <option value="">-- Select a job --</option>
+                            {% for job_id, job_name in jobs.items() %}
+                            <option value="{{ job_id }}">{{ job_name }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted">Candidates will be uploaded for this specific job position</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="file" class="form-label"><strong>Select CSV or Excel File</strong></label>
                         <input type="file" class="form-control" id="file" name="file" accept=".csv,.xlsx,.xls" required>
                     </div>
 
@@ -54,24 +66,44 @@
                             <li>Format: CSV or Excel (.xlsx, .xls)</li>
                             <li>Required columns: <code>candidate_id</code>, <code>name</code>, <code>email</code></li>
                             <li>candidate_id must be a UUID</li>
+                            <li>Each candidate will be associated with the selected job</li>
                         </ul>
                     </div>
 
-                    <button type="submit" class="btn btn-primary">Upload</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-upload"></i> Upload Candidates
+                    </button>
                 </form>
             </div>
         </div>
     </div>
 
     <div class="col-md-4">
-        <div class="card">
+        <div class="card mb-3">
             <div class="card-header bg-secondary text-white">
                 <h5 class="mb-0">Sample CSV Format</h5>
             </div>
             <div class="card-body">
                 <pre class="bg-light p-3 rounded">candidate_id,name,email
-7f3e9a2c-4b1d-4f8e...,John Doe,john@iitb.ac.in
-8a4f0b3d-5c2e-5g9f...,Jane Smith,jane@iitd.ac.in</pre>
+7f3e9a2c-4b1d-4f8e...,John Doe,john@example.com
+8a4f0b3d-5c2e-5g9f...,Jane Smith,jane@example.com</pre>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">Booking Link Format</h5>
+            </div>
+            <div class="card-body">
+                <p class="small mb-2"><strong>After uploading candidates, send them slot booking links in this format:</strong></p>
+                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book?candidate_id=<span class="text-primary">CANDIDATE_UUID</span>&job_id=<span class="text-success">JOB_UUID</span></pre>
+
+                <p class="small mb-2 mt-3"><strong>Example for Software Development Engineer I:</strong></p>
+                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book?candidate_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d&job_id=e34e8e92-95ff-47f5-8e2f-86baa397c2a0</pre>
+
+                <div class="alert alert-warning small mt-3 mb-0">
+                    <strong>Note:</strong> The job_id parameter must match the job you selected during upload. Both job_id and candidate_id must be valid UUIDs.
+                </div>
             </div>
         </div>
     </div>

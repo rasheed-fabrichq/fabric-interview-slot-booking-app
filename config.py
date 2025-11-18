@@ -1,38 +1,21 @@
 """
-Configuration file for Interview Slot Booking Application
+Configuration file for Multi-Job Interview Slot Booking Application
 """
 
-# College to Day mapping
-COLLEGE_DAY_MAPPING = {
-    'IIT Bombay': 'Saturday',
-    'IIT Delhi': 'Saturday',
-    'IIT Madras': 'Saturday',
-    'IIT Roorkee': 'Saturday',
-    'IIT Guwahati': 'Saturday',
-    'IIT Dhanbad': 'Saturday',
-    'IIT Kharagpur (IIT KGP)': 'Sunday',
-    'IIT BHU': 'Sunday',
-    'IIT Kanpur': 'Sunday'
+# Job definitions (actual job UUIDs and names)
+JOBS = {
+    'e34e8e92-95ff-47f5-8e2f-86baa397c2a0': 'Software Development Engineer I',
+    'd770069d-de27-4489-bdcc-0122ebf68a05': 'Data Scientist – I',
+    '62566b89-8826-4140-8427-5413e4fa3ec7': 'Senior Associate – Business Management'
 }
 
-# List of colleges for dropdown
-COLLEGES = list(COLLEGE_DAY_MAPPING.keys())
+def is_valid_job_id(job_id):
+    """Check if job_id is valid"""
+    return job_id in JOBS
 
-# Interview dates (to be configured)
-INTERVIEW_DATES = {
-    'Saturday': '15-11-2025',  # dd-MM-yyyy format
-    'Sunday': '16-11-2025'
-}
-
-# Slot configuration
-SLOT_CAPACITY = 10  # Max candidates per slot across all colleges
-SLOT_DURATION_MINUTES = 30
-
-# Full 24-hour coverage with 30-minute intervals (48 slots per day)
-# Interviews are AI-conducted, so time is not a constraint
-SLOT_TIMES = [f"{hour:02d}:{minute:02d}"
-              for hour in range(24)
-              for minute in [0, 30]]
+def get_job_name(job_id):
+    """Get job name from job_id"""
+    return JOBS.get(job_id, 'Unknown Job')
 
 # Database configuration
 DATABASE_PATH = 'instance/slots.db'

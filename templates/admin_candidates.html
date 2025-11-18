@@ -49,7 +49,7 @@
                                 <th>#</th>
                                 <th>Name</th>
                                 <th>Email</th>
-                                <th>College</th>
+                                <th>Job Position</th>
                                 <th>Status</th>
                                 <th>Candidate ID</th>
                                 <th>Interview Link</th>
@@ -62,7 +62,7 @@
                                 <td>{{ loop.index }}</td>
                                 <td>{{ candidate.name }}</td>
                                 <td>{{ candidate.email }}</td>
-                                <td>{{ candidate.college_name }}</td>
+                                <td>{{ candidate.job_name }}</td>
                                 <td>
                                     {% if candidate.status == 'pending' %}
                                         <span class="badge bg-info">Pending</span>

@@ -1,251 +1,349 @@
-# Interview Slot Booking Application - Requirements & Plan
+# Multi-Job Interview Slot Booking Application - Requirements & Documentation
 
 ## Project Overview
-A Flask-based web application for managing interview slot bookings for campus drives across 9 IITs. Built for one-time use with quick deployment requirements.
+A Flask-based web application for managing interview slot bookings for multiple job positions. Built for FabricHQ with support for multiple independent job configurations.
 
 ## Core Requirements
 
-### 1. Candidate Management
-- Admin uploads candidate data: `candidate_id` (UUID), `name`, `email`
-- Each candidate receives unique booking link with their `candidate_id`
-- Candidate can book only once (enforced by status tracking)
-- Name and email are pre-filled and read-only in booking form
+### 1. Multi-Job Support
+- **3 Independent Job Positions:**
+  - Software Development Engineer I (UUID: `e34e8e92-95ff-47f5-8e2f-86baa397c2a0`)
+  - Data Scientist – I (UUID: `d770069d-de27-4489-bdcc-0122ebf68a05`)
+  - Senior Associate – Business Management (UUID: `62566b89-8826-4140-8427-5413e4fa3ec7`)
+- Each job has independent configuration:
+  - Custom time ranges (start time, end time)
+  - Different slot durations (15, 30, 45, 60, 90, 120 minutes)
+  - Different capacity per slot
+  - Independent interview dates
+  - Independent booking enable/disable controls
 
-### 2. Slot Booking Rules
-- **10 candidates maximum per time slot ACROSS ALL COLLEGES** (shared capacity)
-- Slots are 30-minute intervals
-- **Full 24-hour availability**: Interviews are AI-conducted, so slots cover entire day (00:00 to 23:30)
-- **48 slots per day** (00:00, 00:30, 01:00... 23:00, 23:30)
-- Colleges divided by days:
-  - **Saturday**: IIT Bombay, IIT Delhi, IIT Madras, IIT Roorkee
-  - **Sunday**: IIT Guwahati, IIT Dhanbad, IIT Kharagpur (IIT KGP), IIT BHU, IIT Kanpur
+### 2. Candidate Management
+- Admin uploads candidates per job with CSV containing:
+  - `name` - Candidate's full name
+  - `email` - Valid email address
+  - `interview_link` - Format: `https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>`
+- Interview link is parsed to extract:
+  - `job_id` from URL path (`/jobs/<JOB_UUID>/`)
+  - `candidate_id` from query parameter (`?candidate_id=<UUID>`)
+- Each candidate receives **slot booking link**: `https://slot-booking.fabrichq.ai/book?candidate_id=<UUID>&job_id=<UUID>`
+- **Multi-job booking support:**
+  - Candidates CAN book slots for MULTIPLE different jobs
+  - Candidates CANNOT book multiple slots for the SAME job (enforced by `UNIQUE(candidate_id, job_id)` constraint)
 
-### 3. Candidate Status Tracking
+### 3. Slot Booking Rules
+- **Per-job capacity** - Each job has configurable capacity per slot
+- **Dynamic slot generation** - Slots created based on job configuration:
+  - Start time and end time define the booking window
+  - Slot duration determines interval length
+  - Automatically generates all slots within the time range
+- **Multiple interview dates** - Each job can have multiple interview dates
+- **Two-step booking flow:**
+  1. Select interview date
+  2. Select time slot for that date
+- **Back navigation** - Candidates can go back and change their date selection
+
+### 4. Candidate Status Tracking
 - `pending` → Initial state after upload
 - `clicked` → When candidate opens booking link
 - `booked` → After successful slot confirmation
-- Once `booked`, candidate cannot access form again
+- Once `booked` for a job, candidate cannot book again for that same job
 
-### 4. Concurrent Booking Handling
+### 5. Concurrent Booking Handling
 - Multiple candidates can try to book same slot simultaneously
-- Use database transactions with locking to prevent overbooking
-- If slot fills up during booking attempt, show error: "This slot has just been booked by other candidates. Please choose another available slot."
+- Database transactions with locking prevent overbooking
+- If slot fills up during booking attempt, show error message
 - Allow retry with different slot
 
-### 5. Data Storage Format
+### 6. Link Formats
+
+**Interview Link** (stored in database, used for data extraction):
 ```
-Booking record:
-- Name: Rahul Sharma
-- Email: rahul.sharma@iitb.ac.in
-- College: IIT Bombay
-- Start time: 14-11-2025 10:00
-- End time: 14-11-2025 10:30
+https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
 ```
 
-### 6. Data Export
+**Slot Booking Link** (sent to candidates):
+```
+https://slot-booking.fabrichq.ai/book?candidate_id=<CANDIDATE_UUID>&job_id=<JOB_UUID>
+```
+
+### 7. Data Export
 - Download all bookings as Excel (.xlsx) or CSV (.csv)
-- Each record = one confirmed booking
+- Each record = one confirmed booking with job information
+- Interview link includes start/end time parameters when exporting
 
 ## Technical Architecture
 
 ### Tech Stack
-- **Backend**: Flask (Python)
+- **Backend**: Flask 3.0.0 (Python)
 - **Database**: SQLite with WAL mode for concurrent writes
-- **Frontend**: HTML + Jinja2 templates + Vanilla JavaScript + Bootstrap
-- **Security**: Flask-WTF (CSRF protection), Session-based tokens, Status validation
-- **No React** (simplicity for hosting)
+- **Frontend**: HTML + Jinja2 templates + Vanilla JavaScript + Bootstrap 5
+- **Security**: Flask-WTF (CSRF protection), Session-based tokens, 9-layer validation
+- **Data Processing**: Pandas, OpenPyXL
 
 ### Security Features
 
-The application implements multiple layers of security to prevent unauthorized bookings:
+The application implements 9 layers of security validation:
 
-#### 1. Session-Based Booking Tokens
-- **Unique token generated** when candidate accesses booking form
-- Token stored in server-side session (not just in browser)
-- Token must be included in booking confirmation request
-- Token is single-use (marked as used after booking attempt)
-
-#### 2. CSRF Protection
-- Flask-WTF provides CSRF protection for all forms
-- Prevents cross-site request forgery attacks
-
-#### 3. Status-Based Access Control
-- Candidates must have status 'clicked' to book (not 'pending')
-- Direct API calls with 'pending' status are rejected
-- Ensures candidate accessed the booking form legitimately
-
-#### 4. Session Validation
-- Candidate ID in request must match session
-- Prevents booking on behalf of other candidates
-- Session data cleared after successful booking
-
-#### 5. Single-Use Token Enforcement
-- Token can only be used once
-- If booking fails (slot full), token is reset for retry
-- Prevents replay attacks
-
-#### 6. Comprehensive Validation Checks
-1. All required fields present (candidate_id, slot_id, college_name, booking_token)
-2. Token matches session token
-3. Token not already used
-4. Candidate ID matches session
-5. Candidate exists in database
-6. Candidate status is 'clicked' (not 'pending')
-7. Candidate not already booked
-8. College is valid
+#### Booking Confirmation Security Checks:
+1. **Required fields validation** - All fields present (candidate_id, job_id, slot_id, booking_token)
+2. **Token validation** - Token matches session token
+3. **Token usage validation** - Token not already used
+4. **Candidate ID validation** - Matches session candidate_id
+5. **Job ID validation** - Matches session job_id
+6. **Candidate existence** - Candidate exists in database
+7. **Candidate status** - Status is 'clicked' (not 'pending')
+8. **Duplicate booking check** - Candidate hasn't already booked for this job
+9. **Job booking status** - Booking enabled for this job
 
 **Security Violations Return HTTP 403 (Forbidden)**
 
 ### Database Schema
 
+#### job_configs table
+```sql
+id                      INTEGER PRIMARY KEY AUTOINCREMENT
+job_id                  TEXT UNIQUE NOT NULL           -- Job UUID
+job_name                TEXT NOT NULL
+slot_start_time         TEXT NOT NULL                  -- HH:MM format
+slot_end_time           TEXT NOT NULL                  -- HH:MM format
+slot_duration_minutes   INTEGER NOT NULL               -- 15, 30, 45, 60, 90, 120
+capacity_per_slot       INTEGER NOT NULL               -- Max candidates per slot
+booking_enabled         INTEGER DEFAULT 1              -- 0 or 1
+created_at              DATETIME
+updated_at              DATETIME
+```
+
+#### job_dates table
+```sql
+id                INTEGER PRIMARY KEY AUTOINCREMENT
+job_id            TEXT NOT NULL                 -- FK to job_configs.job_id
+date              TEXT NOT NULL                 -- dd-MM-yyyy format
+day_of_week       TEXT NOT NULL                 -- e.g., 'Monday'
+created_at        DATETIME
+UNIQUE(job_id, date)
+```
+
 #### candidates table
 ```sql
 id                INTEGER PRIMARY KEY AUTOINCREMENT
-candidate_id      TEXT UNIQUE NOT NULL        -- UUID from upload
+candidate_id      TEXT NOT NULL                 -- UUID from interview link
+job_id            TEXT NOT NULL                 -- FK to job_configs.job_id
 name              TEXT NOT NULL
 email             TEXT NOT NULL
-status            TEXT DEFAULT 'pending'      -- pending/clicked/booked
+interview_link    TEXT                          -- Original interview link
+status            TEXT DEFAULT 'pending'        -- pending/clicked/booked
 created_at        DATETIME
 updated_at        DATETIME
+UNIQUE(candidate_id, job_id)                    -- Same person can apply to different jobs
 ```
 
 #### slots table
 ```sql
 id                INTEGER PRIMARY KEY AUTOINCREMENT
-day               TEXT NOT NULL               -- 'Saturday' or 'Sunday'
-start_time        TEXT NOT NULL               -- 'HH:MM' format (e.g., '10:00')
-date              TEXT NOT NULL               -- 'dd-MM-yyyy' format
-booked_count      INTEGER DEFAULT 0           -- Current bookings (0-10)
-max_capacity      INTEGER DEFAULT 10          -- Always 10
+job_id            TEXT NOT NULL                 -- FK to job_configs.job_id
+date              TEXT NOT NULL                 -- dd-MM-yyyy format
+day_of_week       TEXT NOT NULL
+start_time        TEXT NOT NULL                 -- HH:MM format
+booked_count      INTEGER DEFAULT 0             -- Current bookings
 created_at        DATETIME
+UNIQUE(job_id, date, start_time)                -- One slot per job per date per time
 ```
-
-**IMPORTANT**: Each slot record represents ONE time slot shared across ALL colleges for that day. When any candidate from any college books this slot, `booked_count` increments.
 
 #### bookings table
 ```sql
 id                INTEGER PRIMARY KEY AUTOINCREMENT
-candidate_id      TEXT NOT NULL               -- FK to candidates.candidate_id
-slot_id           INTEGER NOT NULL            -- FK to slots.id
-college_name      TEXT NOT NULL
+candidate_id      TEXT NOT NULL
+job_id            TEXT NOT NULL                 -- FK to job_configs.job_id
+slot_id           INTEGER NOT NULL              -- FK to slots.id
 booked_at         DATETIME
+UNIQUE(candidate_id, job_id)                    -- One booking per candidate per job
+```
+
+#### settings table
+```sql
+key               TEXT PRIMARY KEY
+value             TEXT NOT NULL
+updated_at        DATETIME
 ```
 
 ### Project Structure
 ```
-interview-booking/
-├── claude.md                 # This file - requirements & plan
-├── app.py                    # Main Flask application
-├── database.py               # Database initialization & models
-├── config.py                 # Configuration (dates, colleges)
-├── requirements.txt          # Python dependencies
+fabric-interview-slot-booking-app/
+├── claude.md                       # This file - documentation
+├── app.py                          # Main Flask application (848 lines)
+├── database.py                     # Database functions (876 lines)
+├── config.py                       # Job configurations
+├── requirements.txt                # Python dependencies
 ├── templates/
-│   ├── admin_upload.html     # Admin: Upload candidates
-│   ├── admin_dashboard.html  # Admin: View statistics
-│   ├── booking_form.html     # Candidate: Booking form
-│   ├── already_booked.html   # Message: Already booked
-│   ├── invalid_link.html     # Message: Invalid candidate_id
-│   └── success.html          # Message: Booking confirmed
+│   ├── base.html                   # Base template with Bootstrap
+│   ├── admin_login.html            # Admin login
+│   ├── admin_dashboard.html        # Multi-job dashboard with per-job stats
+│   ├── admin_upload.html           # Upload candidates per job
+│   ├── admin_job_config.html       # Configure job settings
+│   ├── admin_job_dates.html        # Manage interview dates per job
+│   ├── admin_init_slots.html       # Initialize/clear slots per job
+│   ├── admin_candidates.html       # View all candidates
+│   ├── admin_bookings.html         # View all bookings
+│   ├── booking_form.html           # Two-step booking form
+│   ├── already_booked.html         # Already booked message
+│   ├── booking_closed.html         # Booking closed message
+│   └── invalid_link.html           # Invalid link message
 ├── static/
 │   ├── css/
-│   │   └── style.css         # Custom styles
+│   │   └── style.css               # Custom styles (date cards, etc.)
 │   └── js/
-│       └── booking.js        # Slot selection logic
+│       └── booking.js              # Two-step booking logic (310 lines)
+├── sample_data/
+│   ├── candidates_sde.csv          # Sample for SDE position
+│   ├── candidates_data_scientist.csv
+│   └── candidates_business_mgmt.csv
 └── instance/
-    └── slots.db              # SQLite database (created at runtime)
+    └── slots.db                    # SQLite database
 ```
 
 ## Application Routes
 
 ### Admin Routes
+
+**Authentication:**
+- `GET/POST /admin/login` - Admin login
+- `GET /admin/logout` - Admin logout
+
+**Dashboard:**
+- `GET /admin/dashboard` - Multi-job dashboard
+  - Overall statistics (total candidates, total bookings)
+  - Per-job statistics (candidates, bookings, status breakdown)
+  - Per-job pause/resume booking controls
+
+**Candidate Upload:**
 - `GET/POST /admin/upload` - Upload candidates CSV/Excel
-  - Accepts file with columns: `candidate_id`, `name`, `email`
+  - Select job from dropdown
+  - Upload file with columns: `name`, `email`, `interview_link`
   - **Validation Rules:**
-    - `candidate_id`: Must be a valid UUID (version 4)
-    - `name`: Required, cannot be empty, max 100 characters
-    - `email`: Must be valid email format (regex validated)
-    - All three fields must be present in each row
-  - Shows detailed error messages with row numbers and full row data for debugging
-  - Shows first 50 validation errors
+    - `name`: Required, 1-100 characters
+    - `email`: Valid email format
+    - `interview_link`: Must be valid URL with format `https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<UUID>`
+    - Both job_id and candidate_id must be valid UUIDs
+    - job_id in URL must match selected job
+  - Shows first 50 validation errors with row numbers
   - Creates candidate records with status='pending'
 
-- `GET /admin/init-slots` - Initialize time slots for both days
-  - Creates slot records based on SLOT_TIMES configuration
-  - Run once before sending booking links
+**Job Configuration:**
+- `GET/POST /admin/job-config` - Configure job settings
+  - Set start time, end time, slot duration, capacity per job
+  - Warning: Changing config doesn't affect already initialized slots
 
-- `GET /admin/dashboard` - View booking statistics
-  - Total candidates uploaded
-  - Total bookings made
-  - Slots utilization
+**Date Management:**
+- `GET/POST /admin/job-dates` - Manage interview dates
+  - Add/delete dates per job
+  - Deleting a date removes all associated slots and bookings
 
-- `GET /admin/export` - Download all bookings
-  - Format: Excel (.xlsx) or CSV (.csv) - controlled by `?format=xlsx` or `?format=csv` query parameter
-  - Includes: candidate_id, name, email, college, start_time, end_time, booked_at
-  - Default format: Excel (.xlsx)
+**Slot Management:**
+- `GET/POST /admin/init-slots` - Initialize slots
+  - Creates time slots based on job config and dates
+  - Per-job initialization
+- `POST /admin/clear-slots` - Clear all slots and bookings for a job
+
+**Job Booking Control:**
+- `POST /admin/toggle-job-booking/<job_id>` - Enable/disable booking per job
+
+**Data Viewing:**
+- `GET /admin/candidates` - View all candidates (with job filter)
+- `GET /admin/bookings` - View all bookings (with job filter)
+
+**Export:**
+- `GET /admin/export` - Download bookings
+  - Format: Excel (.xlsx) or CSV (.csv) via `?format=xlsx|csv` parameter
+  - Includes: candidate_id, name, email, job_name, date, day_of_week, start_time, end_time, booked_at
 
 ### Candidate Routes
-- `GET /book?candidate_id=<uuid>` - Main booking form
-  - Validates candidate_id exists
-  - If status='booked' → redirect to already_booked.html
+
+- `GET /book?candidate_id=<uuid>&job_id=<uuid>` - Booking form
+  - Validates candidate_id and job_id
+  - If status='booked' → show already_booked.html
   - If status='pending' → update to 'clicked'
-  - Pre-fill name & email (read-only fields)
-  - Show college dropdown
+  - Pre-fill name & email (read-only)
+  - Two-step flow: date selection → slot selection
 
 - `POST /book/confirm` - Confirm slot booking
-  - Receives: candidate_id, slot_id, college_name
+  - 9-layer security validation
   - Transaction-safe booking with SQLite locking
-  - Validates slot availability
   - Creates booking record
   - Updates candidate status to 'booked'
-  - Returns JSON: {success: true} or {error: "message"}
+  - Returns JSON: {success: true, ...} or {error: "message"}
 
-- `GET /api/slots?day=<Saturday|Sunday>` - Get available slots (JSON API)
-  - Returns slots for specified day with availability
-  - Format: `[{id: 1, start_time: '10:00', booked_count: 5, available: 5}, ...]`
+### API Routes
+
+- `GET /api/job-dates?job_id=<uuid>` - Get available dates for a job
+  - Returns: `[{date: '20-11-2025', day_of_week: 'Thursday'}, ...]`
+
+- `GET /api/slots?job_id=<uuid>&date=<dd-mm-yyyy>` - Get available slots
+  - Returns slots for specific job and date
+  - Format: `[{id: 1, start_time: '10:00', booked_count: 5, capacity: 10, available: 5}, ...]`
 
 ## Key Implementation Details
 
-### 1. College to Day Mapping
+### 1. Job Configuration (config.py)
 ```python
-COLLEGE_DAY_MAPPING = {
-    'IIT Bombay': 'Saturday',
-    'IIT Delhi': 'Saturday',
-    'IIT Madras': 'Saturday',
-    'IIT Roorkee': 'Saturday',
-    'IIT Guwahati': 'Sunday',
-    'IIT Dhanbad': 'Sunday',
-    'IIT Kharagpur (IIT KGP)': 'Sunday',
-    'IIT BHU': 'Sunday',
-    'IIT Kanpur': 'Sunday'
+JOBS = {
+    'e34e8e92-95ff-47f5-8e2f-86baa397c2a0': 'Software Development Engineer I',
+    'd770069d-de27-4489-bdcc-0122ebf68a05': 'Data Scientist – I',
+    '62566b89-8826-4140-8427-5413e4fa3ec7': 'Senior Associate – Business Management'
 }
+
+def is_valid_job_id(job_id):
+    return job_id in JOBS
+
+def get_job_name(job_id):
+    return JOBS.get(job_id, 'Unknown Job')
 ```
 
-### 2. Concurrent Booking Protection
+### 2. Interview Link Parsing (app.py)
 ```python
-# Enable SQLite WAL mode for better concurrency
+def extract_candidate_id_and_job_from_url(interview_link):
+    """
+    Extract candidate_id and job_id from interview link URL
+    Format: https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
+    Returns: (candidate_id, job_id, error_message) tuple
+    """
+    # Extract job_id from URL path: /jobs/<JOB_UUID>/
+    job_path_match = re.search(r'/jobs/([a-f0-9\-]+)/?', url_str, re.IGNORECASE)
+    job_id = job_path_match.group(1).strip()
+
+    # Extract candidate_id from query parameter
+    candidate_match = re.search(r'[?&]candidate_id=([^&]+)', url_str)
+    candidate_id = candidate_match.group(1).strip()
+
+    # Validate both are valid UUIDs
+    # Validate job_id exists in system
+```
+
+### 3. Concurrent Booking Protection (database.py)
+```python
+# Enable SQLite WAL mode
 conn.execute('PRAGMA journal_mode=WAL')
 
-# Use BEGIN IMMEDIATE for exclusive lock during booking
-def book_slot(candidate_id, slot_id, college):
-    conn.execute('BEGIN IMMEDIATE')
+def book_slot(candidate_id, job_id, slot_id):
+    """Transaction-safe slot booking"""
+    conn = get_db_connection()
+    conn.execute('BEGIN IMMEDIATE')  # Exclusive lock
+
     try:
+        # Check if already booked for this job
+        existing = get_booking_by_candidate_and_job(candidate_id, job_id)
+        if existing:
+            return {'error': 'Already booked for this job'}
+
         # Get slot with lock
         slot = get_slot(slot_id)
+        config = get_job_config(job_id)
 
-        # Check availability
-        if slot['booked_count'] >= 10:
+        # Check capacity
+        if slot['booked_count'] >= config['capacity_per_slot']:
             conn.rollback()
-            return {'error': 'This slot has just been booked by other candidates. Please choose another available slot.'}
+            return {'error': 'Slot is full'}
 
-        # Increment booked count
-        update_slot_count(slot_id)
-
-        # Create booking
-        create_booking(candidate_id, slot_id, college)
-
-        # Update candidate status
-        update_candidate_status(candidate_id, 'booked')
-
+        # Increment count, create booking, update status
         conn.commit()
         return {'success': True}
     except Exception as e:
@@ -253,143 +351,225 @@ def book_slot(candidate_id, slot_id, college):
         return {'error': str(e)}
 ```
 
-### 3. Frontend Slot Display Logic (JavaScript)
-```javascript
-// On college selection
-collegeDropdown.addEventListener('change', function() {
-    const college = this.value;
-    const day = COLLEGE_DAY_MAPPING[college];
+### 4. Dynamic Slot Generation (database.py)
+```python
+def generate_slot_times(start_time, end_time, duration_minutes):
+    """Generate slot times based on configuration"""
+    slots = []
+    current = datetime.strptime(start_time, '%H:%M')
+    end = datetime.strptime(end_time, '%H:%M')
 
-    // Fetch slots for this day
-    fetch(`/api/slots?day=${day}`)
-        .then(response => response.json())
-        .then(slots => {
-            displaySlots(slots);
-        });
-});
+    # Handle midnight crossing (e.g., 08:00 to 00:00 = full day)
+    if end <= current:
+        end += timedelta(days=1)
 
-// Display slots with visual indicators
-function displaySlots(slots) {
-    slots.forEach(slot => {
-        const available = 10 - slot.booked_count;
-        let cssClass = '';
+    while current < end:
+        slots.append(current.strftime('%H:%M'))
+        current += timedelta(minutes=duration_minutes)
 
-        if (available === 0) {
-            cssClass = 'slot-full';  // Gray, disabled
-        } else if (available <= 3) {
-            cssClass = 'slot-almost-full';  // Yellow/warning
-        } else {
-            cssClass = 'slot-available';  // Green
-        }
+    return slots
 
-        // Create slot card
-        // Show: time, available count, clickable if not full
-    });
-}
+def initialize_slots_for_job(job_id):
+    """Create slots for all dates configured for this job"""
+    config = get_job_config(job_id)
+    dates = get_job_dates(job_id)
+    slot_times = generate_slot_times(
+        config['slot_start_time'],
+        config['slot_end_time'],
+        config['slot_duration_minutes']
+    )
+
+    for date_info in dates:
+        for start_time in slot_times:
+            # Create slot record
+            insert_slot(job_id, date_info['date'], date_info['day_of_week'], start_time)
 ```
 
-### 4. Time Slot Configuration
-```python
-# Full 24-hour coverage with 30-minute intervals (48 slots per day)
-# Generated programmatically: ['00:00', '00:30', '01:00', '01:30', ... '23:00', '23:30']
-# Interviews are AI-conducted, so time is not a constraint
-SLOT_TIMES = [f"{hour:02d}:{minute:02d}"
-              for hour in range(24)
-              for minute in [0, 30]]
-
-# Interview dates
-INTERVIEW_DATES = {
-    'Saturday': '16-11-2025',
-    'Sunday': '17-11-2025'
+### 5. Two-Step Booking Flow (booking.js)
+```javascript
+// Step 1: Load and display dates
+function loadDates() {
+    fetch(`/api/job-dates?job_id=${jobId}`)
+        .then(response => response.json())
+        .then(dates => displayDates(dates));
 }
+
+// Step 2: When date selected, load slots
+function selectDate(date, dayOfWeek) {
+    selectedDate = date;
+    dateSelectionContainer.classList.add('d-none');
+    loadSlots(jobId, date);
+}
+
+// Load slots for selected date
+function loadSlots(jobId, date) {
+    fetch(`/api/slots?job_id=${jobId}&date=${date}`)
+        .then(response => response.json())
+        .then(slots => displaySlots(slots));
+}
+
+// Back to dates button
+backToDatesBtn.addEventListener('click', function() {
+    // Reset selections, show date selection again
+    dateSelectionContainer.classList.remove('d-none');
+    slotContainer.classList.add('d-none');
+});
 ```
 
 ## User Flow Examples
 
 ### Admin Flow
-1. Admin uploads CSV with candidates (candidate_id, name, email)
-2. Admin initializes slots via `/admin/init-slots`
-3. Admin sends emails with booking links: `https://domain.com/book?candidate_id=<UUID>`
-4. Admin monitors dashboard for booking statistics
-5. Admin exports bookings after 24 hours
+1. Login to admin dashboard
+2. Upload candidates for each job position (CSV with name, email, interview_link)
+3. Configure job settings (time range, duration, capacity)
+4. Add interview dates for each job
+5. Initialize slots for each job
+6. Monitor per-job statistics on dashboard
+7. Pause/resume booking per job as needed
+8. Export booking data
 
 ### Candidate Flow
-1. Candidate clicks link from email: `https://domain.com/book?candidate_id=abc123...`
-2. Status updates: 'pending' → 'clicked'
-3. Form loads with:
-   - Name: **Riya Singh** (read-only)
-   - Email: **riya.singh@iitd.ac.in** (read-only)
-   - College: [Dropdown with 9 IITs]
-4. Candidate selects "IIT Delhi" → System determines day = Saturday
-5. Slots for Saturday display - all 48 slots from 00:00 to 23:30 (AI interview, 24-hour availability)
-6. Candidate clicks "11:30" slot → clicks "Confirm"
-7. Backend validates & books (if available)
-8. Success message: "Your interview slot for 11:30 on Saturday has been confirmed."
-9. Status updates: 'clicked' → 'booked'
-10. Link becomes inactive for this candidate
+1. Receives slot booking link: `https://slot-booking.fabrichq.ai/book?candidate_id=<UUID>&job_id=<UUID>`
+2. Opens link, status updates: 'pending' → 'clicked'
+3. Sees pre-filled name and email (read-only)
+4. **Step 1:** Selects interview date (e.g., "Thursday, 20-11-2025")
+   - Can click "Back to Dates" to change selection
+5. **Step 2:** Selects time slot (e.g., "10:00 AM - 11:00 AM")
+   - Green = Available
+   - Yellow = Almost Full
+   - Gray = Full (disabled)
+6. Clicks "Confirm Booking"
+7. Success message displays booking details
+8. Status updates: 'clicked' → 'booked'
+9. Cannot book again for this job (can book for other jobs with different links)
 
 ### Concurrent Booking Scenario
-- **10:00:00** - Candidate A views "10:30 AM" slot (9/10 booked)
-- **10:00:01** - Candidate B views "10:30 AM" slot (9/10 booked)
-- **10:00:02** - Candidate A clicks "Confirm" → **Success** (10/10)
-- **10:00:03** - Candidate B clicks "Confirm" → **Error**: "This slot has just been booked by other candidates. Please choose another available slot."
-- **10:00:05** - Candidate B selects "11:00 AM" → **Success**
+- **10:00:00** - Candidate A views "10:30" slot (19/20 booked)
+- **10:00:01** - Candidate B views "10:30" slot (19/20 booked)
+- **10:00:02** - Candidate A clicks "Confirm" → **Success** (20/20)
+- **10:00:03** - Candidate B clicks "Confirm" → **Error**: "Slot is full"
+- **10:00:05** - Candidate B selects "11:00" → **Success**
+
+## Sample Data
+
+Three sample CSV files provided in `sample_data/`:
+
+**candidates_sde.csv** - Software Development Engineer I
+```csv
+name,email,interview_link
+Rajesh Kumar,rajesh.kumar@example.com,https://app.fabrichq.ai/jobs/e34e8e92-95ff-47f5-8e2f-86baa397c2a0/?candidate_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d
+```
+
+**candidates_data_scientist.csv** - Data Scientist – I
+
+**candidates_business_mgmt.csv** - Senior Associate – Business Management
 
 ## Dependencies
 ```
 Flask==3.0.0
+Flask-WTF==1.2.1
 pandas==2.1.4
 openpyxl==3.1.2
 Werkzeug==3.0.1
 ```
 
-## Deployment Options
-1. **Railway** (Recommended) - Free tier, persistent storage, easy deployment
-2. **Render** - Free tier available
-3. **PythonAnywhere** - Free tier with limitations
+## Setup and Deployment
 
-## Development Checklist
-- [ ] Create project structure
-- [ ] Set up database with proper schema
-- [ ] Implement admin upload (CSV/Excel)
-- [ ] Implement slot initialization
-- [ ] Implement booking form with validation
-- [ ] Implement concurrent-safe slot booking
-- [ ] Create all HTML templates
-- [ ] Add JavaScript for dynamic slot selection
-- [ ] Implement export functionality
-- [ ] Style with Bootstrap
-- [ ] Test concurrent booking scenarios
-- [ ] Deploy to hosting platform
+### Initial Setup
+1. Install dependencies: `pip install -r requirements.txt`
+2. Initialize database: `python database.py`
+3. Run application: `python app.py`
+4. Access admin at: `http://localhost:5000/admin/login`
+   - Default credentials: `admin@fabrichq.ai` / `fabrichqai`
 
-## Testing Scenarios
-1. Upload 10 test candidates
-2. Initialize slots
-3. Open multiple booking links simultaneously
-4. Try to book same slot from multiple browsers
-5. Verify only 10 bookings allowed per slot
-6. Verify error message when slot fills up
-7. Verify candidate cannot book twice
-8. Export data and validate format
+### Database Initialization
+The database is automatically seeded with:
+- 3 job configurations (SDE, Data Scientist, Business Management)
+- Default settings (booking enabled)
+- No dates or slots (must be configured by admin)
+
+### Configuration
+**Admin Credentials** (config.py):
+```python
+ADMIN_USERNAME = 'admin@fabrichq.ai'
+ADMIN_PASSWORD = 'fabrichqai'  # Change in production
+```
+
+**Database Path** (config.py):
+```python
+DATABASE_PATH = 'instance/slots.db'
+```
 
 ## Important Notes
-- **Slot capacity is SHARED across all colleges** - 10 total per time slot, not per college
-- **SQLite WAL mode is critical** for handling concurrent writes
-- **Transaction locking prevents race conditions** during booking
-- **candidate_id is UUID** - secure, unpredictable
-- **Status tracking prevents multiple bookings** by same candidate
-- **One-time use application** - optimized for fast deployment, not long-term maintenance
 
-## Configuration Before Deployment
-1. Update `INTERVIEW_DATES` in config.py with actual dates
-2. Change `ADMIN_PASSWORD` in config.py
-3. Adjust `SLOT_TIMES` if different schedule needed
-4. Verify college list and day assignments
+### Multi-Job Architecture
+- Each job is completely independent
+- Different configurations don't affect each other
+- Candidates can book slots for multiple jobs
+- One booking per candidate per job (enforced at database level)
 
-## Post-Deployment Steps
-1. Upload candidate list via admin panel
-2. Initialize slots
-3. Test booking flow with 2-3 test candidates
-4. Send booking link emails to all candidates
-5. Monitor dashboard during booking window
-6. Export final data after 24 hours
+### Security
+- CSRF tokens required on all admin forms
+- Session-based booking tokens (single-use)
+- 9-layer validation on booking confirmation
+- Foreign key constraints ensure data integrity
+- WAL mode prevents concurrent booking conflicts
+
+### Link Format Distinction
+- **Interview Link**: Stored in database, parsed for candidate/job IDs
+- **Slot Booking Link**: Sent to candidates, uses query parameters
+
+### Database Schema Fix
+- Removed invalid foreign key constraint: `FOREIGN KEY (candidate_id) REFERENCES candidates(candidate_id)`
+- Reason: `candidate_id` is not unique in candidates table (part of composite key)
+- Integrity maintained by: `UNIQUE(candidate_id, job_id)` constraints in both candidates and bookings tables
+
+### CSRF Protection
+All POST forms include CSRF token:
+```html
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+```
+
+## Testing Checklist
+- [ ] Upload candidates for each job
+- [ ] Configure job settings (time, duration, capacity)
+- [ ] Add interview dates for each job
+- [ ] Initialize slots for each job
+- [ ] Test booking flow (date selection → slot selection)
+- [ ] Test "Back to Dates" functionality
+- [ ] Test concurrent booking for same slot
+- [ ] Verify one candidate cannot book same job twice
+- [ ] Verify candidate can book different jobs
+- [ ] Test pause/resume booking per job
+- [ ] Test data export (Excel and CSV)
+- [ ] Verify all CSRF tokens working
+
+## Admin Dashboard Features
+
+### Overall Statistics
+- Total candidates (across all jobs)
+- Total bookings (across all jobs)
+
+### Per-Job Cards
+- Job name with active/paused status badge
+- Candidates count
+- Bookings count
+- Pending count
+- Status breakdown (progress bar showing pending/clicked/booked)
+- Pause/Resume booking button
+
+### Quick Actions
+- Upload Candidates
+- Job Configuration
+- Manage Dates
+- Initialize Slots
+- View Candidates
+- View Bookings
+- Export Data (Excel/CSV)
+
+## Future Enhancements
+- Email notifications for booking confirmations
+- Candidate rescheduling (within same job)
+- Bulk operations (pause all jobs, export per job)
+- Admin analytics (booking trends, peak times)
+- WhatsApp integration for booking links
