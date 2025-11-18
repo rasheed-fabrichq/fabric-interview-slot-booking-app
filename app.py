@@ -87,7 +87,7 @@ def is_valid_name(name):
 def extract_candidate_id_and_job_from_url(interview_link):
     """
     Extract candidate_id and job_id from interview link URL
-    Expected format: https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
+    Expected format: https://app.fabrichq.ai/interview/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
     Returns: (candidate_id, job_id, error_message) tuple
     """
     if not interview_link or pd.isna(interview_link):
@@ -100,10 +100,10 @@ def extract_candidate_id_and_job_from_url(interview_link):
         if not url_str.startswith('http://') and not url_str.startswith('https://'):
             return None, None, "Invalid URL format - must start with http:// or https://"
 
-        # Extract job_id from URL path pattern: /jobs/<JOB_UUID>/
-        job_path_match = re.search(r'/jobs/([a-f0-9\-]+)/?', url_str, re.IGNORECASE)
+        # Extract job_id from URL path pattern: /interview/<JOB_UUID>/
+        job_path_match = re.search(r'/interview/([a-f0-9\-]+)/?', url_str, re.IGNORECASE)
         if not job_path_match:
-            return None, None, "job_id not found in URL path - expected format: /jobs/<JOB_UUID>/"
+            return None, None, "job_id not found in URL path - expected format: /interview/<JOB_UUID>/"
 
         job_id = job_path_match.group(1).strip()
 

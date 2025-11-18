@@ -21,9 +21,9 @@ A Flask-based web application for managing interview slot bookings for multiple 
 - Admin uploads candidates per job with CSV containing:
   - `name` - Candidate's full name
   - `email` - Valid email address
-  - `interview_link` - Format: `https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>`
+  - `interview_link` - Format: `https://app.fabrichq.ai/interview/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>`
 - Interview link is parsed to extract:
-  - `job_id` from URL path (`/jobs/<JOB_UUID>/`)
+  - `job_id` from URL path (`/interview/<JOB_UUID>/`)
   - `candidate_id` from query parameter (`?candidate_id=<UUID>`)
 - Each candidate receives **slot booking link**: `https://slot-booking.fabrichq.ai/book?candidate_id=<UUID>&job_id=<UUID>`
 - **Multi-job booking support:**
@@ -58,7 +58,7 @@ A Flask-based web application for managing interview slot bookings for multiple 
 
 **Interview Link** (stored in database, used for data extraction):
 ```
-https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
+https://app.fabrichq.ai/interview/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
 ```
 
 **Slot Booking Link** (sent to candidates):
@@ -222,7 +222,7 @@ fabric-interview-slot-booking-app/
   - **Validation Rules:**
     - `name`: Required, 1-100 characters
     - `email`: Valid email format
-    - `interview_link`: Must be valid URL with format `https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<UUID>`
+    - `interview_link`: Must be valid URL with format `https://app.fabrichq.ai/interview/<JOB_UUID>/?candidate_id=<UUID>`
     - Both job_id and candidate_id must be valid UUIDs
     - job_id in URL must match selected job
   - Shows first 50 validation errors with row numbers
@@ -303,11 +303,11 @@ def get_job_name(job_id):
 def extract_candidate_id_and_job_from_url(interview_link):
     """
     Extract candidate_id and job_id from interview link URL
-    Format: https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
+    Format: https://app.fabrichq.ai/interview/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
     Returns: (candidate_id, job_id, error_message) tuple
     """
-    # Extract job_id from URL path: /jobs/<JOB_UUID>/
-    job_path_match = re.search(r'/jobs/([a-f0-9\-]+)/?', url_str, re.IGNORECASE)
+    # Extract job_id from URL path: /interview/<JOB_UUID>/
+    job_path_match = re.search(r'/interview/([a-f0-9\-]+)/?', url_str, re.IGNORECASE)
     job_id = job_path_match.group(1).strip()
 
     # Extract candidate_id from query parameter
@@ -457,7 +457,7 @@ Three sample CSV files provided in `sample_data/`:
 **candidates_sde.csv** - Software Development Engineer I
 ```csv
 name,email,interview_link
-Rajesh Kumar,rajesh.kumar@example.com,https://app.fabrichq.ai/jobs/e34e8e92-95ff-47f5-8e2f-86baa397c2a0/?candidate_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d
+Rajesh Kumar,rajesh.kumar@example.com,https://app.fabrichq.ai/interview/e34e8e92-95ff-47f5-8e2f-86baa397c2a0/?candidate_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d
 ```
 
 **candidates_data_scientist.csv** - Data Scientist – I

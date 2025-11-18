@@ -174,7 +174,7 @@ def seed_job_configs(cursor):
     """Seed initial job configurations"""
     jobs = [
         {
-            'job_id': 'e34e8e92-95ff-47f5-8e2f-86baa397c2a0',
+            'job_id': 'fc4c9c14-208c-427a-be2e-4d0080f286d6',
             'job_name': 'Software Development Engineer I',
             'start_time': '08:00',
             'end_time': '00:00',
@@ -183,7 +183,7 @@ def seed_job_configs(cursor):
             'dates': []  # Dates will be added by admin
         },
         {
-            'job_id': 'd770069d-de27-4489-bdcc-0122ebf68a05',
+            'job_id': 'b4f5ea74-a44a-4c93-a0f2-08abfaa337ed',
             'job_name': 'Data Scientist – I',
             'start_time': '08:00',
             'end_time': '00:00',
@@ -192,7 +192,7 @@ def seed_job_configs(cursor):
             'dates': []  # Dates will be added by admin
         },
         {
-            'job_id': '62566b89-8826-4140-8427-5413e4fa3ec7',
+            'job_id': 'a6c802c5-4861-4003-98c2-451069dff950',
             'job_name': 'Senior Associate – Business Management',
             'start_time': '08:00',
             'end_time': '00:00',
