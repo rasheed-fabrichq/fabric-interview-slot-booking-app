@@ -791,7 +791,7 @@ def get_all_bookings(job_id=None):
             JOIN slots s ON b.slot_id = s.id
             JOIN job_configs jc ON b.job_id = jc.job_id
             WHERE b.job_id = ?
-            ORDER BY s.date, s.start_time
+            ORDER BY b.booked_at
         ''', (job_id,))
     else:
         cursor.execute('''
@@ -811,7 +811,7 @@ def get_all_bookings(job_id=None):
             JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
             JOIN slots s ON b.slot_id = s.id
             JOIN job_configs jc ON b.job_id = jc.job_id
-            ORDER BY s.date, s.start_time
+            ORDER BY b.booked_at
         ''')
 
     bookings = [dict(row) for row in cursor.fetchall()]
