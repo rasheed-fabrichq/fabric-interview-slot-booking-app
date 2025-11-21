@@ -1,7 +1,8 @@
 """
 Main Flask application for Multi-Job Interview Slot Booking System
 """
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session, Response
+import io
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.utils import secure_filename
 import pandas as pd
@@ -841,6 +842,54 @@ def admin_candidates():
                          candidates=candidates,
                          jobs=JOBS,
                          selected_job=job_id)
+
+
+@app.route('/admin/export-pending')
+@admin_required
+def admin_export_pending():
+    """Export pending and clicked candidates (non-booked) to CSV"""
+    job_id = request.args.get('job_id')
+    status_filter = request.args.get('status', 'all')  # 'pending', 'clicked', or 'all'
+
+    candidates = get_all_candidates(job_id if job_id and is_valid_job_id(job_id) else None)
+
+    # Filter for non-booked candidates (pending or clicked)
+    if status_filter == 'pending':
+        filtered = [c for c in candidates if c['status'] == 'pending']
+    elif status_filter == 'clicked':
+        filtered = [c for c in candidates if c['status'] == 'clicked']
+    else:
+        filtered = [c for c in candidates if c['status'] in ('pending', 'clicked')]
+
+    if not filtered:
+        return "No candidates to export", 400
+
+    # Prepare CSV data
+    export_data = []
+    for c in filtered:
+        export_data.append({
+            'Name': c['name'],
+            'Email': c['email'],
+            'Interview Link': c.get('interview_link', '')
+        })
+
+    df = pd.DataFrame(export_data)
+
+    # Generate CSV
+    output = io.StringIO()
+    df.to_csv(output, index=False)
+    output.seek(0)
+
+    # Create filename
+    job_suffix = f"_{job_id}" if job_id else "_all_jobs"
+    status_suffix = f"_{status_filter}" if status_filter != 'all' else "_pending_clicked"
+    filename = f"candidates{job_suffix}{status_suffix}.csv"
+
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
 
 
 @app.route('/admin/slots')

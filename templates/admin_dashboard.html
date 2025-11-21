@@ -265,7 +265,7 @@
         <h4 class="mb-3">Export Data</h4>
     </div>
 
-    <div class="col-md-6 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card shadow">
             <div class="card-body">
                 <h6 class="card-title">
@@ -284,11 +284,11 @@
         </div>
     </div>
 
-    <div class="col-md-6 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card shadow">
             <div class="card-body">
                 <h6 class="card-title">
-                    <i class="bi bi-download"></i> Export by Job
+                    <i class="bi bi-download"></i> Export Bookings by Job
                 </h6>
                 <p class="card-text small text-muted">Download bookings for specific job</p>
                 <div class="btn-group w-100">
@@ -316,6 +316,43 @@
                             <a class="dropdown-item" href="/admin/export?format=csv&job_id={{ job_stat.job_id }}">
                                 {{ job_stat.job_name }}
                                 <span class="badge bg-secondary float-end">{{ job_stat.total_bookings }}</span>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body">
+                <h6 class="card-title">
+                    <i class="bi bi-person-x"></i> Export Non-Booked Candidates
+                </h6>
+                <p class="card-text small text-muted">Pending & clicked candidates (CSV)</p>
+                <div class="btn-group w-100 mb-2">
+                    <a href="/admin/export-pending" class="btn btn-warning btn-sm">
+                        <i class="bi bi-file-text"></i> All Non-Booked
+                    </a>
+                    <a href="/admin/export-pending?status=pending" class="btn btn-outline-warning btn-sm">
+                        Pending Only
+                    </a>
+                    <a href="/admin/export-pending?status=clicked" class="btn btn-outline-info btn-sm">
+                        Clicked Only
+                    </a>
+                </div>
+                <div class="btn-group w-100">
+                    <button type="button" class="btn btn-warning btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        <i class="bi bi-filter"></i> By Job
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/export-pending?job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                                <span class="badge bg-warning float-end">{{ (job_stat.pending_count or 0) + (job_stat.clicked_count or 0) }}</span>
                             </a>
                         </li>
                         {% endfor %}
