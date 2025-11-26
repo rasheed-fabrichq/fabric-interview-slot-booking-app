@@ -171,7 +171,7 @@ def init_database():
 
 
 def seed_job_configs(cursor):
-    """Seed initial job configurations"""
+    """Seed initial job configurations (only if they don't exist)"""
     jobs = [
         {
             'job_id': 'fc4c9c14-208c-427a-be2e-4d0080f286d6',
@@ -221,6 +221,38 @@ def seed_job_configs(cursor):
 
 
 # ==================== JOB CONFIGURATION FUNCTIONS ====================
+
+def get_all_jobs():
+    """Get all jobs as a dictionary {job_id: job_name}"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT job_id, job_name FROM job_configs ORDER BY created_at')
+    jobs = {row['job_id']: row['job_name'] for row in cursor.fetchall()}
+    conn.close()
+
+    return jobs
+
+
+def create_job(job_id, job_name, start_time='08:00', end_time='00:00', duration=60, capacity=15):
+    """Create a new job configuration"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            INSERT INTO job_configs
+            (job_id, job_name, slot_start_time, slot_end_time,
+             slot_duration_minutes, capacity_per_slot, booking_enabled)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+        ''', (job_id, job_name, start_time, end_time, duration, capacity))
+        conn.commit()
+        conn.close()
+        return {'success': True}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {'error': 'Job with this ID already exists'}
+
 
 def get_job_config(job_id):
     """Get job configuration"""

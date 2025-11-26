@@ -2,21 +2,23 @@
 Configuration file for Multi-Job Interview Slot Booking Application
 """
 
-# Job definitions (actual job UUIDs and names)
-JOBS = {
-    'fc4c9c14-208c-427a-be2e-4d0080f286d6': 'Software Development Engineer I',
-    'b4f5ea74-a44a-4c93-a0f2-08abfaa337ed': 'Data Scientist – I',
-    'a6c802c5-4861-4003-98c2-451069dff950': 'Senior Associate – Business Management'
-}
+
+def get_jobs():
+    """Get all jobs from database (lazy import to avoid circular dependency)"""
+    from database import get_all_jobs
+    return get_all_jobs()
 
 
 def is_valid_job_id(job_id):
     """Check if job_id is valid"""
-    return job_id in JOBS
+    jobs = get_jobs()
+    return job_id in jobs
+
 
 def get_job_name(job_id):
     """Get job name from job_id"""
-    return JOBS.get(job_id, 'Unknown Job')
+    jobs = get_jobs()
+    return jobs.get(job_id, 'Unknown Job')
 
 # Database configuration
 DATABASE_PATH = 'instance/slots.db'

@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Jobs - Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2>Manage Jobs</h2>
+            <p class="text-muted">Create new job positions and view existing jobs</p>
+        </div>
+    </div>
+
+    {% if success %}
+    <div class="alert alert-success alert-dismissible fade show">
+        {{ success }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="row">
+        <!-- Create New Job Form -->
+        <div class="col-md-6 mb-4">
+            <div class="card shadow">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-plus-circle"></i> Create New Job</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin_jobs') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Job ID (UUID)</strong> <span class="text-danger">*</span></label>
+                            <input type="text" name="job_id" class="form-control"
+                                   placeholder="e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6" required>
+                            <small class="text-muted">Must be a valid UUID v4 format</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Job Name</strong> <span class="text-danger">*</span></label>
+                            <input type="text" name="job_name" class="form-control"
+                                   placeholder="e.g., Software Development Engineer I" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Slot Start Time</strong></label>
+                            <input type="time" name="start_time" class="form-control" value="08:00">
+                            <small class="text-muted">Default: 08:00</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Slot End Time</strong></label>
+                            <input type="time" name="end_time" class="form-control" value="00:00">
+                            <small class="text-muted">Use 00:00 for midnight (end of day). Default: 00:00</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Slot Duration (minutes)</strong></label>
+                            <select name="duration" class="form-select">
+                                <option value="15">15 minutes</option>
+                                <option value="30">30 minutes</option>
+                                <option value="45">45 minutes</option>
+                                <option value="60" selected>60 minutes</option>
+                                <option value="90">90 minutes</option>
+                                <option value="120">120 minutes</option>
+                            </select>
+                            <small class="text-muted">Default: 60 minutes</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Capacity per Slot</strong></label>
+                            <input type="number" name="capacity" class="form-control"
+                                   value="15" min="1" max="100">
+                            <small class="text-muted">Max candidates per slot. Default: 15</small>
+                        </div>
+
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-plus-circle"></i> Create Job
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="alert alert-info mt-3">
+                <strong><i class="bi bi-info-circle"></i> How to get a UUID:</strong>
+                <ul class="mb-0 mt-2">
+                    <li>Generate online: <a href="https://www.uuidgenerator.net/" target="_blank">uuidgenerator.net</a></li>
+                    <li>Linux/Mac: Run <code>uuidgen</code> in terminal</li>
+                    <li>Python: <code>import uuid; print(uuid.uuid4())</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Existing Jobs List -->
+        <div class="col-md-6 mb-4">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="bi bi-briefcase"></i> Existing Jobs</h5>
+                </div>
+                <div class="card-body">
+                    {% if jobs %}
+                    <div class="list-group">
+                        {% for job_id, job_name in jobs.items() %}
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="mb-1">{{ job_name }}</h6>
+                                    <small class="text-muted">{{ job_id }}</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No jobs found.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="alert alert-warning mt-3">
+                <strong><i class="bi bi-exclamation-triangle"></i> Important:</strong>
+                <ul class="mb-0 mt-2">
+                    <li>After creating a job, configure dates in <strong>Job Dates</strong></li>
+                    <li>Then initialize slots in <strong>Initialize Slots</strong></li>
+                    <li>Finally, upload candidates for the job</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

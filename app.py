@@ -23,10 +23,11 @@ from database import (
     get_job_config, get_all_job_configs, update_job_config,
     get_job_dates, add_job_date, delete_job_date,
     is_booking_enabled_for_job, set_job_booking_enabled,
-    get_candidate_booking_for_job, get_all_slots_for_job
+    get_candidate_booking_for_job, get_all_slots_for_job,
+    create_job
 )
 from config import (
-    JOBS, is_valid_job_id, get_job_name,
+    get_jobs, is_valid_job_id, get_job_name,
     ADMIN_USERNAME, ADMIN_PASSWORD
 )
 
@@ -423,19 +424,19 @@ def admin_upload():
         if not job_id or not is_valid_job_id(job_id):
             return render_template('admin_upload.html',
                                  error='Please select a valid job',
-                                 jobs=JOBS)
+                                 jobs=get_jobs())
 
         if 'file' not in request.files:
             return render_template('admin_upload.html',
                                  error='No file uploaded',
-                                 jobs=JOBS)
+                                 jobs=get_jobs())
 
         file = request.files['file']
 
         if file.filename == '':
             return render_template('admin_upload.html',
                                  error='No file selected',
-                                 jobs=JOBS)
+                                 jobs=get_jobs())
 
         if file:
             filename = secure_filename(file.filename)
@@ -451,14 +452,14 @@ def admin_upload():
                 else:
                     return render_template('admin_upload.html',
                                          error='Invalid file format. Use CSV or Excel.',
-                                         jobs=JOBS)
+                                         jobs=get_jobs())
 
                 # Validate columns (removed college_name, kept interview_link optional)
                 required_columns = ['name', 'email', 'interview_link']
                 if not all(col in df.columns for col in required_columns):
                     return render_template('admin_upload.html',
                                          error=f'Missing required columns: {required_columns}',
-                                         jobs=JOBS)
+                                         jobs=get_jobs())
 
                 # Add candidates with validation
                 success_count = 0
@@ -545,14 +546,14 @@ def admin_upload():
                                      success=f'{success_count} candidates uploaded successfully for {get_job_name(job_id)}.',
                                      error=f'{error_count} errors occurred.' if error_count > 0 else None,
                                      errors=errors[:50],  # Show first 50 errors
-                                     jobs=JOBS)
+                                     jobs=get_jobs())
 
             except Exception as e:
                 return render_template('admin_upload.html',
                                      error=f'Error processing file: {str(e)}',
-                                     jobs=JOBS)
+                                     jobs=get_jobs())
 
-    return render_template('admin_upload.html', jobs=JOBS)
+    return render_template('admin_upload.html', jobs=get_jobs())
 
 
 @app.route('/admin/job-config', methods=['GET', 'POST'])
@@ -569,13 +570,13 @@ def admin_job_config():
         if not all([job_id, start_time, end_time, duration, capacity]):
             return render_template('admin_job_config.html',
                                  error='All fields are required',
-                                 jobs=JOBS,
+                                 jobs=get_jobs(),
                                  configs=get_all_job_configs())
 
         if not is_valid_job_id(job_id):
             return render_template('admin_job_config.html',
                                  error='Invalid job ID',
-                                 jobs=JOBS,
+                                 jobs=get_jobs(),
                                  configs=get_all_job_configs())
 
         try:
@@ -589,17 +590,17 @@ def admin_job_config():
 
             return render_template('admin_job_config.html',
                                  success=f'Configuration updated for {get_job_name(job_id)}',
-                                 jobs=JOBS,
+                                 jobs=get_jobs(),
                                  configs=get_all_job_configs())
 
         except ValueError as e:
             return render_template('admin_job_config.html',
                                  error=f'Invalid input: {str(e)}',
-                                 jobs=JOBS,
+                                 jobs=get_jobs(),
                                  configs=get_all_job_configs())
 
     return render_template('admin_job_config.html',
-                         jobs=JOBS,
+                         jobs=get_jobs(),
                          configs=get_all_job_configs())
 
 
@@ -614,8 +615,8 @@ def admin_job_dates():
         if not is_valid_job_id(job_id):
             return render_template('admin_job_dates.html',
                                  error='Invalid job ID',
-                                 jobs=JOBS,
-                                 all_dates={jid: get_job_dates(jid) for jid in JOBS.keys()})
+                                 jobs=get_jobs(),
+                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
         if action == 'add':
             date_str = request.form.get('date')  # Format: yyyy-mm-dd from date input
@@ -623,8 +624,8 @@ def admin_job_dates():
             if not date_str:
                 return render_template('admin_job_dates.html',
                                      error='Date is required',
-                                     jobs=JOBS,
-                                     all_dates={jid: get_job_dates(jid) for jid in JOBS.keys()})
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
             try:
                 # Convert yyyy-mm-dd to dd-mm-yyyy and get day of week
@@ -637,19 +638,19 @@ def admin_job_dates():
                 if 'error' in result:
                     return render_template('admin_job_dates.html',
                                          error=result['error'],
-                                         jobs=JOBS,
-                                         all_dates={jid: get_job_dates(jid) for jid in JOBS.keys()})
+                                         jobs=get_jobs(),
+                                         all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
                 return render_template('admin_job_dates.html',
                                      success=f'Date {formatted_date} ({day_of_week}) added to {get_job_name(job_id)}',
-                                     jobs=JOBS,
-                                     all_dates={jid: get_job_dates(jid) for jid in JOBS.keys()})
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
             except ValueError:
                 return render_template('admin_job_dates.html',
                                      error='Invalid date format',
-                                     jobs=JOBS,
-                                     all_dates={jid: get_job_dates(jid) for jid in JOBS.keys()})
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
         elif action == 'delete':
             date = request.form.get('date')  # Format: dd-mm-yyyy
@@ -658,12 +659,12 @@ def admin_job_dates():
 
             return render_template('admin_job_dates.html',
                                  success=f'Date {date} removed from {get_job_name(job_id)}',
-                                 jobs=JOBS,
-                                 all_dates={jid: get_job_dates(jid) for jid in JOBS.keys()})
+                                 jobs=get_jobs(),
+                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
     return render_template('admin_job_dates.html',
-                         jobs=JOBS,
-                         all_dates={jid: get_job_dates(jid) for jid in JOBS.keys()})
+                         jobs=get_jobs(),
+                         all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
 
 @app.route('/admin/init-slots', methods=['GET', 'POST'])
@@ -676,7 +677,7 @@ def admin_init_slots():
         if not is_valid_job_id(job_id):
             return render_template('admin_init_slots.html',
                                  error='Invalid job ID',
-                                 jobs=JOBS,
+                                 jobs=get_jobs(),
                                  configs=get_all_job_configs())
 
         result = initialize_slots_for_job(job_id)
@@ -684,16 +685,16 @@ def admin_init_slots():
         if 'error' in result:
             return render_template('admin_init_slots.html',
                                  error=result['error'],
-                                 jobs=JOBS,
+                                 jobs=get_jobs(),
                                  configs=get_all_job_configs())
 
         return render_template('admin_init_slots.html',
                              success=f"{result['slots_created']} slots initialized successfully for {get_job_name(job_id)}!",
-                             jobs=JOBS,
+                             jobs=get_jobs(),
                              configs=get_all_job_configs())
 
     return render_template('admin_init_slots.html',
-                         jobs=JOBS,
+                         jobs=get_jobs(),
                          configs=get_all_job_configs())
 
 
@@ -827,7 +828,7 @@ def admin_bookings():
 
     return render_template('admin_bookings.html',
                          bookings=bookings,
-                         jobs=JOBS,
+                         jobs=get_jobs(),
                          selected_job=job_id)
 
 
@@ -840,7 +841,7 @@ def admin_candidates():
 
     return render_template('admin_candidates.html',
                          candidates=candidates,
-                         jobs=JOBS,
+                         jobs=get_jobs(),
                          selected_job=job_id)
 
 
@@ -926,9 +927,61 @@ def admin_slots():
 
     return render_template('admin_slots.html',
                          dates_data=dates_data,
-                         jobs=JOBS,
+                         jobs=get_jobs(),
                          selected_job=job_id,
                          job_name=get_job_name(job_id))
+
+
+@app.route('/admin/jobs', methods=['GET', 'POST'])
+@admin_required
+def admin_jobs():
+    """Manage jobs - create new jobs"""
+    if request.method == 'POST':
+        job_id = request.form.get('job_id')
+        job_name = request.form.get('job_name')
+        start_time = request.form.get('start_time', '08:00')
+        end_time = request.form.get('end_time', '00:00')
+        duration = request.form.get('duration', '60')
+        capacity = request.form.get('capacity', '15')
+
+        if not all([job_id, job_name]):
+            return render_template('admin_jobs.html',
+                                 error='Job ID and Job Name are required',
+                                 jobs=get_jobs())
+
+        # Validate UUID format
+        try:
+            from uuid import UUID
+            UUID(str(job_id).strip(), version=4)
+        except (ValueError, AttributeError):
+            return render_template('admin_jobs.html',
+                                 error='Job ID must be a valid UUID (e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6)',
+                                 jobs=get_jobs())
+
+        try:
+            duration_int = int(duration)
+            capacity_int = int(capacity)
+
+            if duration_int <= 0 or capacity_int <= 0:
+                raise ValueError("Duration and capacity must be positive")
+
+            result = create_job(job_id.strip(), job_name.strip(), start_time, end_time, duration_int, capacity_int)
+
+            if 'error' in result:
+                return render_template('admin_jobs.html',
+                                     error=result['error'],
+                                     jobs=get_jobs())
+
+            return render_template('admin_jobs.html',
+                                 success=f'Job "{job_name}" created successfully!',
+                                 jobs=get_jobs())
+
+        except ValueError as e:
+            return render_template('admin_jobs.html',
+                                 error=f'Invalid input: {str(e)}',
+                                 jobs=get_jobs())
+
+    return render_template('admin_jobs.html', jobs=get_jobs())
 
 
 # Error handlers
