@@ -63,11 +63,21 @@ def init_database():
             job_id TEXT NOT NULL,
             date TEXT NOT NULL,
             day_of_week TEXT NOT NULL,
+            slot_start_time TEXT,
+            slot_end_time TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(job_id, date),
             FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
         )
     ''')
+
+    # Add columns to existing job_dates table if they don't exist (for migration)
+    cursor.execute("PRAGMA table_info(job_dates)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if 'slot_start_time' not in columns:
+        cursor.execute('ALTER TABLE job_dates ADD COLUMN slot_start_time TEXT')
+    if 'slot_end_time' not in columns:
+        cursor.execute('ALTER TABLE job_dates ADD COLUMN slot_end_time TEXT')
 
     # Create candidates table (with job_id)
     cursor.execute('''
@@ -343,12 +353,12 @@ def set_job_booking_enabled(job_id, enabled):
 # ==================== JOB DATES FUNCTIONS ====================
 
 def get_job_dates(job_id):
-    """Get all dates for a specific job"""
+    """Get all dates for a specific job with optional time overrides"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
-        SELECT date, day_of_week FROM job_dates
+        SELECT date, day_of_week, slot_start_time, slot_end_time FROM job_dates
         WHERE job_id = ?
         ORDER BY date
     ''', (job_id,))
@@ -359,22 +369,39 @@ def get_job_dates(job_id):
     return dates
 
 
-def add_job_date(job_id, date, day_of_week):
-    """Add a new interview date for a job"""
+def add_job_date(job_id, date, day_of_week, start_time=None, end_time=None):
+    """Add a new interview date for a job with optional custom time range"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute('''
-            INSERT INTO job_dates (job_id, date, day_of_week)
-            VALUES (?, ?, ?)
-        ''', (job_id, date, day_of_week))
+            INSERT INTO job_dates (job_id, date, day_of_week, slot_start_time, slot_end_time)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (job_id, date, day_of_week, start_time, end_time))
         conn.commit()
         conn.close()
         return {'success': True}
     except sqlite3.IntegrityError:
         conn.close()
         return {'error': 'This date already exists for this job'}
+
+
+def update_job_date_times(job_id, date, start_time, end_time):
+    """Update time range for a specific date"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        UPDATE job_dates
+        SET slot_start_time = ?, slot_end_time = ?
+        WHERE job_id = ? AND date = ?
+    ''', (start_time, end_time, job_id, date))
+
+    conn.commit()
+    conn.close()
+
+    return {'success': True}
 
 
 def delete_job_date(job_id, date):
@@ -521,11 +548,11 @@ def generate_slot_times(start_time, end_time, duration_minutes):
 
 
 def initialize_slots_for_job(job_id):
-    """Initialize all time slots for a specific job"""
+    """Initialize all time slots for a specific job (supports per-date time ranges)"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get job configuration
+    # Get job configuration (default times and duration)
     cursor.execute('''
         SELECT slot_start_time, slot_end_time, slot_duration_minutes
         FROM job_configs WHERE job_id = ?
@@ -536,9 +563,9 @@ def initialize_slots_for_job(job_id):
         conn.close()
         return {'error': 'Job configuration not found'}
 
-    # Get all dates for this job
+    # Get all dates for this job (with optional time overrides)
     cursor.execute('''
-        SELECT date, day_of_week FROM job_dates WHERE job_id = ?
+        SELECT date, day_of_week, slot_start_time, slot_end_time FROM job_dates WHERE job_id = ?
     ''', (job_id,))
 
     dates = cursor.fetchall()
@@ -554,18 +581,22 @@ def initialize_slots_for_job(job_id):
         conn.close()
         return {'error': f'Slots already initialized for this job. Clear existing slots first.'}
 
-    # Generate slot times
-    slot_times = generate_slot_times(
-        config['slot_start_time'],
-        config['slot_end_time'],
-        config['slot_duration_minutes']
-    )
-
     # Insert slots for each date
     slots_inserted = 0
     for date_row in dates:
         date = date_row['date']
         day_of_week = date_row['day_of_week']
+
+        # Use date-specific times if available, otherwise fall back to job config
+        date_start_time = date_row['slot_start_time'] or config['slot_start_time']
+        date_end_time = date_row['slot_end_time'] or config['slot_end_time']
+
+        # Generate slot times for this specific date
+        slot_times = generate_slot_times(
+            date_start_time,
+            date_end_time,
+            config['slot_duration_minutes']
+        )
 
         for start_time in slot_times:
             cursor.execute('''

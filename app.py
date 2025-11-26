@@ -24,7 +24,7 @@ from database import (
     get_job_dates, add_job_date, delete_job_date,
     is_booking_enabled_for_job, set_job_booking_enabled,
     get_candidate_booking_for_job, get_all_slots_for_job,
-    create_job
+    create_job, update_job_date_times
 )
 from config import (
     get_jobs, is_valid_job_id, get_job_name,
@@ -620,6 +620,8 @@ def admin_job_dates():
 
         if action == 'add':
             date_str = request.form.get('date')  # Format: yyyy-mm-dd from date input
+            start_time = request.form.get('start_time')  # Optional custom start time
+            end_time = request.form.get('end_time')  # Optional custom end time
 
             if not date_str:
                 return render_template('admin_job_dates.html',
@@ -633,7 +635,11 @@ def admin_job_dates():
                 formatted_date = date_obj.strftime('%d-%m-%Y')
                 day_of_week = date_obj.strftime('%A')
 
-                result = add_job_date(job_id, formatted_date, day_of_week)
+                # Only pass start/end time if they are provided (not empty strings)
+                custom_start = start_time if start_time and start_time.strip() else None
+                custom_end = end_time if end_time and end_time.strip() else None
+
+                result = add_job_date(job_id, formatted_date, day_of_week, custom_start, custom_end)
 
                 if 'error' in result:
                     return render_template('admin_job_dates.html',
@@ -641,8 +647,12 @@ def admin_job_dates():
                                          jobs=get_jobs(),
                                          all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
+                time_info = ""
+                if custom_start and custom_end:
+                    time_info = f" (Custom times: {custom_start} - {custom_end})"
+
                 return render_template('admin_job_dates.html',
-                                     success=f'Date {formatted_date} ({day_of_week}) added to {get_job_name(job_id)}',
+                                     success=f'Date {formatted_date} ({day_of_week}){time_info} added to {get_job_name(job_id)}',
                                      jobs=get_jobs(),
                                      all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
@@ -651,6 +661,24 @@ def admin_job_dates():
                                      error='Invalid date format',
                                      jobs=get_jobs(),
                                      all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+        elif action == 'update_times':
+            date = request.form.get('date')  # Format: dd-mm-yyyy
+            start_time = request.form.get('start_time')
+            end_time = request.form.get('end_time')
+
+            if not all([date, start_time, end_time]):
+                return render_template('admin_job_dates.html',
+                                     error='Date, start time, and end time are required',
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+            update_job_date_times(job_id, date, start_time, end_time)
+
+            return render_template('admin_job_dates.html',
+                                 success=f'Time range updated for {date}: {start_time} - {end_time}',
+                                 jobs=get_jobs(),
+                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
         elif action == 'delete':
             date = request.form.get('date')  # Format: dd-mm-yyyy
