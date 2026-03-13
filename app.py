@@ -1,7 +1,24 @@
 """
 Main Flask application for Multi-Job Interview Slot Booking System
 """
-from email_utils import send_booking_confirmation
+# dotenv MUST be loaded first, before any module that reads os.environ
+from dotenv import load_dotenv
+load_dotenv()
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session, Response
+import io
+from flask_wtf.csrf import CSRFProtect
+from werkzeug.utils import secure_filename
+import pandas as pd
+import os
+import secrets
+import re
+import threading
+from uuid import UUID
+from datetime import datetime, timedelta
+from functools import wraps
+
+# Import from local modules
 from database import (
     init_database, add_candidate, get_candidate, update_candidate_status,
     get_slots_by_job_and_date, book_slot, get_all_bookings,
@@ -15,27 +32,11 @@ from database import (
     create_job, update_job_date_times,
     update_booking_email_status, get_booking_with_details
 )
-from functools import wraps
-from datetime import datetime, timedelta
-from uuid import UUID
-import threading
-from dotenv import load_dotenv
-load_dotenv()  # Load .env before anything reads os.environ
-
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session, Response
-import io
-from flask_wtf.csrf import CSRFProtect
-from werkzeug.utils import secure_filename
-import pandas as pd
-import os
-import secrets
-import re
-
-# Import from local modules
 from config import (
     get_jobs, is_valid_job_id, get_job_name,
     ADMIN_USERNAME, ADMIN_PASSWORD
 )
+from email_utils import send_booking_confirmation
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-in-production'  # Change this!
@@ -57,29 +58,31 @@ init_database()
 def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, slot_duration, delay_seconds=300):
     """Send booking confirmation email in a background thread, with optional delay."""
     import time
-    time.sleep(delay_seconds)  # Default: wait 5 minutes before sending
+    print(f"[EMAIL] Thread started for candidate={candidate_id} job={job_id}. Waiting {delay_seconds}s before sending...")
+    time.sleep(delay_seconds)
+    print(f"[EMAIL] Delay done. Fetching booking details for candidate={candidate_id} job={job_id}")
 
     try:
-        # Fetch booking + candidate details
         booking = get_booking_with_details(candidate_id, job_id)
         if not booking:
+            print(f"[EMAIL] ERROR: No booking found for candidate={candidate_id} job={job_id}. Aborting.")
             return
 
-        # Build start/end datetimes
-        start_dt = datetime.strptime(
-            f"{slot_date} {slot_time}", "%d-%m-%Y %H:%M")
-        end_dt = start_dt + timedelta(minutes=slot_duration)
+        print(f"[EMAIL] Booking found: name={booking['name']} email={booking['email']} date={booking['date']} time={booking['start_time']}")
 
+        start_dt = datetime.strptime(f"{slot_date} {slot_time}", "%d-%m-%Y %H:%M")
+        end_dt = start_dt + timedelta(minutes=slot_duration)
         start_time_fmt = start_dt.strftime("%I:%M %p")
         end_time_fmt = end_dt.strftime("%I:%M %p")
 
-        # Build interview link with expiry params
         interview_link_with_expiry = add_expiry_to_interview_link(
             booking.get('interview_link', ''),
             start_dt,
             end_dt
         )
+        print(f"[EMAIL] Interview link built: {interview_link_with_expiry[:80]}...")
 
+        print(f"[EMAIL] Calling send_booking_confirmation for {booking['email']}...")
         success, error = send_booking_confirmation(
             candidate_name=booking['name'],
             candidate_email=booking['email'],
@@ -92,14 +95,15 @@ def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, sl
         )
 
         if success:
+            print(f"[EMAIL] SUCCESS: Confirmation email sent to {booking['email']}")
             update_booking_email_status(candidate_id, job_id, 'sent')
         else:
-            update_booking_email_status(
-                candidate_id, job_id, 'failed', error=error)
+            print(f"[EMAIL] FAILED: Could not send to {booking['email']}. Error: {error}")
+            update_booking_email_status(candidate_id, job_id, 'failed', error=error)
 
     except Exception as e:
-        update_booking_email_status(
-            candidate_id, job_id, 'failed', error=str(e))
+        print(f"[EMAIL] EXCEPTION for candidate={candidate_id}: {e}")
+        update_booking_email_status(candidate_id, job_id, 'failed', error=str(e))
 
 
 # Admin authentication decorator
@@ -985,6 +989,7 @@ def admin_export_pending():
 
 @app.route('/admin/resend-email/<candidate_id>/<job_id>', methods=['POST'])
 @admin_required
+@csrf.exempt
 def admin_resend_email(candidate_id, job_id):
     """Resend booking confirmation email for a specific candidate."""
     if not is_valid_job_id(job_id):
@@ -997,10 +1002,10 @@ def admin_resend_email(candidate_id, job_id):
     job_config = get_job_config(job_id)
     slot_duration = job_config['slot_duration_minutes'] if job_config else 30
 
+    print(f"[EMAIL] Admin triggered resend for candidate={candidate_id} job={job_id}")
     email_thread = threading.Thread(
         target=send_confirmation_email_async,
-        args=(candidate_id, job_id,
-              booking['date'], booking['start_time'], slot_duration),
+        args=(candidate_id, job_id, booking['date'], booking['start_time'], slot_duration, 0),  # delay=0 for manual resend
         daemon=True
     )
     email_thread.start()

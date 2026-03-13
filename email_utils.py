@@ -246,21 +246,28 @@ def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=N
     """
     access_key = _cfg('AWS_SES_ACCESS_KEY_ID')
     secret_key = _cfg('AWS_SES_SECRET_ACCESS_KEY')
+    region = _cfg('AWS_SES_REGION', 'ap-south-1')
+    sender_email = _cfg('AWS_SES_EMAIL', 'noreply@fabrichq.ai')
+
+    print(f"[SES] Preparing to send email to={mail_to} subject='{subject}'")
+    print(f"[SES] Config: region={region} sender={sender_email} access_key_set={bool(access_key)} secret_key_set={bool(secret_key)}")
 
     if not access_key or not secret_key:
         logger.error("AWS SES credentials not configured. Set AWS_SES_ACCESS_KEY_ID and AWS_SES_SECRET_ACCESS_KEY env vars.")
+        print("[SES] ERROR: credentials missing, cannot send email")
         return False, "AWS SES credentials not configured"
 
     try:
         client = boto3.client(
             "ses",
-            region_name=_cfg('AWS_SES_REGION', 'ap-south-1'),
+            region_name=region,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
         )
 
         sender_name = f"Team {company_name}" if company_name else f"Team {_cfg('EMAIL_COMPANY_NAME', 'Fabric')}"
-        sender = _cfg('AWS_SES_EMAIL', 'noreply@fabrichq.ai')
+        sender = sender_email
+        print(f"[SES] Sending as '{sender_name} <{sender}>'...")
 
         msg = MIMEMultipart("mixed")
         msg["From"] = f"{sender_name} <{sender}>"
@@ -282,15 +289,18 @@ def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=N
             Destinations=[mail_to],
             RawMessage={"Data": msg.as_string()},
         )
+        print(f"[SES] Email sent successfully to {mail_to}. MessageId: {response['MessageId']}")
         logger.info(f"Email sent to {mail_to}. MessageId: {response['MessageId']}")
         return True, None
 
     except ClientError as e:
         error_msg = e.response["Error"]["Message"]
         logger.error(f"SES ClientError sending to {mail_to}: {error_msg}")
+        print(f"[SES] ClientError sending to {mail_to}: {error_msg}")
         return False, error_msg
     except Exception as e:
         logger.error(f"Unexpected error sending email to {mail_to}: {str(e)}")
+        print(f"[SES] Unexpected exception sending to {mail_to}: {e}")
         return False, str(e)
 
 
