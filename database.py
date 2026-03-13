@@ -199,31 +199,31 @@ def init_database():
 def seed_job_configs(cursor):
     """Seed initial job configurations (only if they don't exist)"""
     jobs = [
+        # {
+        #     'job_id': 'fc4c9c14-208c-427a-be2e-4d0080f286d6',
+        #     'job_name': 'Software Development Engineer I',
+        #     'start_time': '08:00',
+        #     'end_time': '00:00',
+        #     'duration': 60,
+        #     'capacity': 20,
+        #     'dates': []  # Dates will be added by admin
+        # },
+        # {
+        #     'job_id': 'b4f5ea74-a44a-4c93-a0f2-08abfaa337ed',
+        #     'job_name': 'Data Scientist – I',
+        #     'start_time': '08:00',
+        #     'end_time': '00:00',
+        #     'duration': 60,
+        #     'capacity': 15,
+        #     'dates': []  # Dates will be added by admin
+        # },
         {
             'job_id': '5f36361d-5ffe-4535-8fa7-34c84c294383',
-            'job_name': 'Software Development Engineer I',
-            'start_time': '08:00',
-            'end_time': '00:00',
-            'duration': 60,
-            'capacity': 20,
-            'dates': []  # Dates will be added by admin
-        },
-        {
-            'job_id': 'b4f5ea74-a44a-4c93-a0f2-08abfaa337ed',
-            'job_name': 'Data Scientist – I',
-            'start_time': '08:00',
-            'end_time': '00:00',
-            'duration': 60,
-            'capacity': 15,
-            'dates': []  # Dates will be added by admin
-        },
-        {
-            'job_id': 'a6c802c5-4861-4003-98c2-451069dff950',
             'job_name': 'Senior Associate – Business Management',
-            'start_time': '08:00',
+            'start_time': '12:00',
             'end_time': '00:00',
-            'duration': 30,
-            'capacity': 15,
+            'duration': 40,
+            'capacity': 30,
             'dates': []  # Dates will be added by admin
         }
     ]

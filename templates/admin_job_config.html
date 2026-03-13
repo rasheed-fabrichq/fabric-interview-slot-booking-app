@@ -56,6 +56,7 @@
                             <select name="duration" class="form-select" required>
                                 <option value="15" {% if config and config.slot_duration_minutes == 15 %}selected{% endif %}>15 minutes</option>
                                 <option value="30" {% if config and config.slot_duration_minutes == 30 %}selected{% endif %}>30 minutes</option>
+                                <option value="40" {% if config and config.slot_duration_minutes == 40 %}selected{% endif %}>40 minutes</option>
                                 <option value="45" {% if config and config.slot_duration_minutes == 45 %}selected{% endif %}>45 minutes</option>
                                 <option value="60" {% if config and config.slot_duration_minutes == 60 %}selected{% endif %}>60 minutes</option>
                                 <option value="90" {% if config and config.slot_duration_minutes == 90 %}selected{% endif %}>90 minutes</option>
