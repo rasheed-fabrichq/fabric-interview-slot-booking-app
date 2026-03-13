@@ -1,19 +1,7 @@
 """
 Main Flask application for Multi-Job Interview Slot Booking System
 """
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session, Response
-import io
-from flask_wtf.csrf import CSRFProtect
-from werkzeug.utils import secure_filename
-import pandas as pd
-import os
-import secrets
-import re
-from uuid import UUID
-from datetime import datetime, timedelta
-from functools import wraps
-
-# Import from local modules
+from email_utils import send_booking_confirmation
 from database import (
     init_database, add_candidate, get_candidate, update_candidate_status,
     get_slots_by_job_and_date, book_slot, get_all_bookings,
@@ -24,8 +12,26 @@ from database import (
     get_job_dates, add_job_date, delete_job_date,
     is_booking_enabled_for_job, set_job_booking_enabled,
     get_candidate_booking_for_job, get_all_slots_for_job,
-    create_job, update_job_date_times
+    create_job, update_job_date_times,
+    update_booking_email_status, get_booking_with_details
 )
+from functools import wraps
+from datetime import datetime, timedelta
+from uuid import UUID
+import threading
+from dotenv import load_dotenv
+load_dotenv()  # Load .env before anything reads os.environ
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session, Response
+import io
+from flask_wtf.csrf import CSRFProtect
+from werkzeug.utils import secure_filename
+import pandas as pd
+import os
+import secrets
+import re
+
+# Import from local modules
 from config import (
     get_jobs, is_valid_job_id, get_job_name,
     ADMIN_USERNAME, ADMIN_PASSWORD
@@ -46,6 +52,54 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Initialize database on startup
 init_database()
+
+
+def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, slot_duration, delay_seconds=300):
+    """Send booking confirmation email in a background thread, with optional delay."""
+    import time
+    time.sleep(delay_seconds)  # Default: wait 5 minutes before sending
+
+    try:
+        # Fetch booking + candidate details
+        booking = get_booking_with_details(candidate_id, job_id)
+        if not booking:
+            return
+
+        # Build start/end datetimes
+        start_dt = datetime.strptime(
+            f"{slot_date} {slot_time}", "%d-%m-%Y %H:%M")
+        end_dt = start_dt + timedelta(minutes=slot_duration)
+
+        start_time_fmt = start_dt.strftime("%I:%M %p")
+        end_time_fmt = end_dt.strftime("%I:%M %p")
+
+        # Build interview link with expiry params
+        interview_link_with_expiry = add_expiry_to_interview_link(
+            booking.get('interview_link', ''),
+            start_dt,
+            end_dt
+        )
+
+        success, error = send_booking_confirmation(
+            candidate_name=booking['name'],
+            candidate_email=booking['email'],
+            job_name=booking['job_name'],
+            slot_date=slot_date,
+            day_of_week=booking['day_of_week'],
+            start_time=start_time_fmt,
+            end_time=end_time_fmt,
+            interview_link_with_expiry=interview_link_with_expiry,
+        )
+
+        if success:
+            update_booking_email_status(candidate_id, job_id, 'sent')
+        else:
+            update_booking_email_status(
+                candidate_id, job_id, 'failed', error=error)
+
+    except Exception as e:
+        update_booking_email_status(
+            candidate_id, job_id, 'failed', error=str(e))
 
 
 # Admin authentication decorator
@@ -361,6 +415,14 @@ def confirm_booking():
     slot_time = result['slot_time']
     start_datetime = datetime.strptime(f"{slot_date} {slot_time}", "%d-%m-%Y %H:%M")
     end_datetime = start_datetime + timedelta(minutes=slot_duration)
+
+    # Send confirmation email in background (non-blocking)
+    email_thread = threading.Thread(
+        target=send_confirmation_email_async,
+        args=(candidate_id, job_id, slot_date, slot_time, slot_duration),
+        daemon=True
+    )
+    email_thread.start()
 
     # Format times in 12-hour format with AM/PM
     start_time_12h = start_datetime.strftime("%I:%M %p")
@@ -921,6 +983,31 @@ def admin_export_pending():
     )
 
 
+@app.route('/admin/resend-email/<candidate_id>/<job_id>', methods=['POST'])
+@admin_required
+def admin_resend_email(candidate_id, job_id):
+    """Resend booking confirmation email for a specific candidate."""
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID'}), 400
+
+    booking = get_booking_with_details(candidate_id, job_id)
+    if not booking:
+        return jsonify({'error': 'Booking not found'}), 404
+
+    job_config = get_job_config(job_id)
+    slot_duration = job_config['slot_duration_minutes'] if job_config else 30
+
+    email_thread = threading.Thread(
+        target=send_confirmation_email_async,
+        args=(candidate_id, job_id,
+              booking['date'], booking['start_time'], slot_duration),
+        daemon=True
+    )
+    email_thread.start()
+
+    return jsonify({'success': True, 'message': 'Email queued for sending'})
+
+
 @app.route('/admin/slots')
 @admin_required
 def admin_slots():
@@ -1024,4 +1111,4 @@ def internal_server_error(e):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5005)
+    app.run(debug=True, host='0.0.0.0', port=5001)

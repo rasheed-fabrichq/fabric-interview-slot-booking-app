@@ -140,11 +140,27 @@ def init_database():
             job_id TEXT NOT NULL,
             slot_id INTEGER NOT NULL,
             booked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            email_status TEXT DEFAULT NULL,
+            email_sent_at DATETIME DEFAULT NULL,
+            email_error TEXT DEFAULT NULL,
             UNIQUE(candidate_id, job_id),
             FOREIGN KEY (job_id) REFERENCES job_configs(job_id),
             FOREIGN KEY (slot_id) REFERENCES slots(id)
         )
     ''')
+
+    # Migrate existing bookings table to add email columns if missing
+    cursor.execute("PRAGMA table_info(bookings)")
+    booking_columns = [col[1] for col in cursor.fetchall()]
+    if 'email_status' not in booking_columns:
+        cursor.execute(
+            'ALTER TABLE bookings ADD COLUMN email_status TEXT DEFAULT NULL')
+    if 'email_sent_at' not in booking_columns:
+        cursor.execute(
+            'ALTER TABLE bookings ADD COLUMN email_sent_at DATETIME DEFAULT NULL')
+    if 'email_error' not in booking_columns:
+        cursor.execute(
+            'ALTER TABLE bookings ADD COLUMN email_error TEXT DEFAULT NULL')
 
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_booking_candidate
@@ -184,7 +200,7 @@ def seed_job_configs(cursor):
     """Seed initial job configurations (only if they don't exist)"""
     jobs = [
         {
-            'job_id': 'fc4c9c14-208c-427a-be2e-4d0080f286d6',
+            'job_id': '5f36361d-5ffe-4535-8fa7-34c84c294383',
             'job_name': 'Software Development Engineer I',
             'start_time': '08:00',
             'end_time': '00:00',
@@ -848,7 +864,10 @@ def get_all_bookings(job_id=None):
                 s.day_of_week,
                 s.start_time,
                 jc.slot_duration_minutes,
-                b.booked_at
+                b.booked_at,
+                b.email_status,
+                b.email_sent_at,
+                b.email_error
             FROM bookings b
             JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
             JOIN slots s ON b.slot_id = s.id
@@ -869,7 +888,10 @@ def get_all_bookings(job_id=None):
                 s.day_of_week,
                 s.start_time,
                 jc.slot_duration_minutes,
-                b.booked_at
+                b.booked_at,
+                b.email_status,
+                b.email_sent_at,
+                b.email_error
             FROM bookings b
             JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
             JOIN slots s ON b.slot_id = s.id
@@ -881,6 +903,57 @@ def get_all_bookings(job_id=None):
     conn.close()
 
     return bookings
+
+
+def update_booking_email_status(candidate_id, job_id, status, error=None):
+    """Update the confirmation email send status for a booking.
+
+    status: 'sent' | 'failed'
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        UPDATE bookings
+        SET email_status = ?, email_sent_at = ?, email_error = ?
+        WHERE candidate_id = ? AND job_id = ?
+    ''', (status, datetime.now(), error, candidate_id, job_id))
+
+    conn.commit()
+    conn.close()
+
+
+def get_booking_with_details(candidate_id, job_id):
+    """Get full booking details needed for sending confirmation email."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT
+            c.candidate_id,
+            c.name,
+            c.email,
+            c.interview_link,
+            jc.job_name,
+            b.job_id,
+            s.date,
+            s.day_of_week,
+            s.start_time,
+            jc.slot_duration_minutes,
+            b.booked_at,
+            b.email_status,
+            b.email_sent_at,
+            b.email_error
+        FROM bookings b
+        JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
+        JOIN slots s ON b.slot_id = s.id
+        JOIN job_configs jc ON b.job_id = jc.job_id
+        WHERE b.candidate_id = ? AND b.job_id = ?
+    ''', (candidate_id, job_id))
+
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 # ==================== DASHBOARD & STATS ====================

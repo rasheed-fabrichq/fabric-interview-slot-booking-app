@@ -8,15 +8,31 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2>All Bookings</h2>
             <div>
-                <a href="/admin/export?format=xlsx" class="btn btn-success me-2">
+                <a href="/admin/export?format=xlsx{% if selected_job %}&job_id={{ selected_job }}{% endif %}" class="btn btn-success me-2">
                     <i class="bi bi-file-earmark-excel"></i> Export Excel
                 </a>
-                <a href="/admin/export?format=csv" class="btn btn-outline-success me-2">
+                <a href="/admin/export?format=csv{% if selected_job %}&job_id={{ selected_job }}{% endif %}" class="btn btn-outline-success me-2">
                     <i class="bi bi-file-earmark-text"></i> Export CSV
                 </a>
                 <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Job filter -->
+<div class="row mb-3">
+    <div class="col-md-4">
+        <form method="GET" action="/admin/bookings">
+            <div class="input-group">
+                <select name="job_id" class="form-select" onchange="this.form.submit()">
+                    <option value="">All Jobs</option>
+                    {% for jid, jname in jobs.items() %}
+                    <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -36,6 +52,9 @@
                                 <th>Date</th>
                                 <th>Time</th>
                                 <th>Booked At</th>
+                                <th>Email Status</th>
+                                <th>Email Sent At</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -46,8 +65,32 @@
                                 <td>{{ booking.email }}</td>
                                 <td>{{ booking.job_name }}</td>
                                 <td>{{ booking.date }}</td>
-                                <td>{{ booking.start_time }} - {{ booking.end_time }}</td>
+                                <td>{{ booking.start_time }}{% if booking.end_time %} - {{ booking.end_time }}{% endif %}</td>
                                 <td>{{ booking.booked_at }}</td>
+                                <td>
+                                    {% if booking.email_status == 'sent' %}
+                                        <span class="badge bg-success">Sent</span>
+                                    {% elif booking.email_status == 'failed' %}
+                                        <span class="badge bg-danger" title="{{ booking.email_error or '' }}">Failed</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Pending</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if booking.email_sent_at %}
+                                        <small>{{ booking.email_sent_at }}</small>
+                                    {% else %}
+                                        <small class="text-muted">—</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary resend-btn"
+                                        data-candidate-id="{{ booking.candidate_id }}"
+                                        data-job-id="{{ booking.job_id }}"
+                                        title="Resend confirmation email">
+                                        <i class="bi bi-envelope-arrow-up"></i> Resend
+                                    </button>
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -61,4 +104,54 @@
         </div>
     </div>
 </div>
+
+<!-- Toast notification -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="emailToast" class="toast align-items-center" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body" id="toastMessage"></div>
+            <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.querySelectorAll('.resend-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var candidateId = this.dataset.candidateId;
+        var jobId = this.dataset.jobId;
+        var button = this;
+
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Sending...';
+
+        fetch('/admin/resend-email/' + candidateId + '/' + jobId, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            var toast = document.getElementById('emailToast');
+            var msg = document.getElementById('toastMessage');
+            if (data.success) {
+                toast.classList.remove('bg-danger', 'text-white');
+                toast.classList.add('bg-success', 'text-white');
+                msg.textContent = 'Email queued for sending. Refresh in a few seconds to see updated status.';
+            } else {
+                toast.classList.remove('bg-success', 'text-white');
+                toast.classList.add('bg-danger', 'text-white');
+                msg.textContent = 'Error: ' + (data.error || 'Unknown error');
+            }
+            var bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+            button.disabled = false;
+            button.innerHTML = '<i class="bi bi-envelope-arrow-up"></i> Resend';
+        })
+        .catch(function(err) {
+            button.disabled = false;
+            button.innerHTML = '<i class="bi bi-envelope-arrow-up"></i> Resend';
+        });
+    });
+});
+</script>
 {% endblock %}
