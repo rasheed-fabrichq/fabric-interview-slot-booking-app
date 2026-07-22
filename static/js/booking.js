@@ -23,6 +23,7 @@ const backToDatesBtn = document.getElementById('back-to-dates-btn');
 const jobSelectionContainer = document.getElementById('job-selection-container');
 const jobSelect = document.getElementById('job-select');
 const jobContinueBtn = document.getElementById('job-continue-btn');
+const jobSelectFullName = document.getElementById('job-select-full-name');
 const selectedJobInfo = document.getElementById('selected-job-info');
 const selectedJobDisplay = document.getElementById('selected-job-display');
 const changeJobBtn = document.getElementById('change-job-btn');
@@ -34,7 +35,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Continue stays disabled until a real position is chosen
     jobSelect.addEventListener('change', function () {
         jobContinueBtn.disabled = !this.value;
+        showFullJobName();
     });
+
+    // Restore state if the browser repopulated the select on a back/refresh
+    showFullJobName();
 
     jobContinueBtn.addEventListener('click', function () {
         if (!jobSelect.value) return;
@@ -42,6 +47,26 @@ document.addEventListener('DOMContentLoaded', function() {
         selectJob(jobSelect.value, option.textContent.trim());
     });
 });
+
+// A long position name is truncated inside the select control, and native
+// dropdowns ignore per-option tooltips in most browsers. So mirror the
+// current selection in full underneath, and put it on the control's own
+// title for hover.
+function showFullJobName() {
+    const name = jobSelect.value
+        ? jobSelect.options[jobSelect.selectedIndex].textContent.trim()
+        : '';
+
+    jobSelect.title = name;
+
+    if (name) {
+        jobSelectFullName.textContent = name;
+        jobSelectFullName.classList.remove('d-none');
+    } else {
+        jobSelectFullName.textContent = '';
+        jobSelectFullName.classList.add('d-none');
+    }
+}
 
 // Function to select a job and move on to dates
 function selectJob(id, name) {
@@ -74,6 +99,7 @@ function backToJobSelection() {
 
     // Re-arm the picker with the previous choice still shown
     jobContinueBtn.disabled = !jobSelect.value;
+    showFullJobName();
     jobSelectionContainer.classList.remove('d-none');
 }
 
