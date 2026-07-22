@@ -11,7 +11,10 @@
             </div>
             <div class="card-body">
                 <div class="alert alert-info">
-                    <strong>Instructions:</strong> First select an AI discussion date, then choose your preferred time slot.
+                    <strong>Instructions:</strong> Choose the position you want to
+                    interview for, then pick a date and a time slot.
+                    <strong>You can book only one interview</strong>, so choose your
+                    position carefully &mdash; it cannot be changed afterwards.
                 </div>
 
                 <!-- Candidate Info (Read-only) -->
@@ -26,15 +29,41 @@
                     </div>
                 </div>
 
-                <!-- Job Display (Read-only) -->
-                <div class="mb-4">
-                    <label class="form-label"><strong>Position:</strong></label>
-                    <input type="text" class="form-control" value="{{ job_name }}" disabled>
+                <!-- Job Selection -->
+                <div id="job-selection-container" class="mb-4">
+                    <h5 class="mb-3">Step 1: Select Position</h5>
+                    <p class="text-muted small">
+                        Choose the position you want to interview for. You may book
+                        only one interview in total.
+                    </p>
+                    <div id="jobs-grid" class="row g-2">
+                        {% for job in jobs %}
+                        <div class="col-md-6">
+                            <div class="card date-card h-100"
+                                 data-job-id="{{ job.job_id }}"
+                                 data-job-name="{{ job.job_name }}">
+                                <div class="card-body text-center">
+                                    <h6 class="mb-0">{{ job.job_name }}</h6>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Selected Job Display -->
+                <div id="selected-job-info" class="alert alert-success d-none mb-4">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div><strong>Position:</strong> <span id="selected-job-display"></span></div>
+                        <button type="button" id="change-job-btn" class="btn btn-outline-secondary btn-sm">
+                            Change
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Date Selection -->
-                <div id="date-selection-container" class="mb-4">
-                    <h5 class="mb-3">Step 1: Select AI Discussion Date</h5>
+                <div id="date-selection-container" class="mb-4 d-none">
+                    <h5 class="mb-3">Step 2: Select Date</h5>
                     <p class="text-muted small">Click on a date to view available time slots for that day.</p>
                     <div id="dates-grid" class="row g-2">
                         <!-- Dates will be loaded here via JavaScript -->
@@ -49,7 +78,7 @@
                 <!-- Slot Selection -->
                 <div id="slot-container" class="d-none">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5 class="mb-0">Step 2: Select Time Slot</h5>
+                        <h5 class="mb-0">Step 3: Select Time Slot</h5>
                         <button type="button" id="back-to-dates-btn" class="btn btn-outline-primary btn-sm">
                             <i class="bi bi-arrow-left"></i> Back to Dates
                         </button>
@@ -127,8 +156,6 @@
 
 <!-- Hidden inputs for JavaScript -->
 <input type="hidden" id="candidate-id" value="{{ candidate.candidate_id }}">
-<input type="hidden" id="job-id" value="{{ job_id }}">
-<input type="hidden" id="job-name" value="{{ job_name }}">
 <input type="hidden" id="booking-token" value="{{ booking_token }}">
 
 {% endblock %}

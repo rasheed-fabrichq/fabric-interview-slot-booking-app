@@ -49,10 +49,9 @@
                                 <th>#</th>
                                 <th>Name</th>
                                 <th>Email</th>
-                                <th>Job Position</th>
                                 <th>Status</th>
                                 <th>Candidate ID</th>
-                                <th>AI Discussion Link</th>
+                                <th>Booked Job / Link</th>
                                 <th>Created At</th>
                             </tr>
                         </thead>
@@ -62,7 +61,6 @@
                                 <td>{{ loop.index }}</td>
                                 <td>{{ candidate.name }}</td>
                                 <td>{{ candidate.email }}</td>
-                                <td>{{ candidate.job_name }}</td>
                                 <td>
                                     {% if candidate.status == 'pending' %}
                                         <span class="badge bg-info">Pending</span>
@@ -78,12 +76,12 @@
                                     <small class="text-muted font-monospace">{{ candidate.candidate_id[:8] }}...</small>
                                 </td>
                                 <td>
-                                    {% if candidate.interview_link %}
-                                    <a href="{{ candidate.interview_link }}" target="_blank" class="btn btn-sm btn-outline-primary" title="{{ candidate.interview_link }}">
-                                        <i class="bi bi-link-45deg"></i> View Link
-                                    </a>
+                                    {% if candidate.booked_job_name %}
+                                    <span class="badge bg-info">{{ candidate.booked_job_name }}</span>
                                     {% else %}
-                                    <span class="text-muted">N/A</span>
+                                    <a href="/book?candidate_id={{ candidate.candidate_id }}" target="_blank" class="btn btn-sm btn-outline-primary" title="Slot booking link">
+                                        <i class="bi bi-link-45deg"></i> Booking Link
+                                    </a>
                                     {% endif %}
                                 </td>
                                 <td>{{ candidate.created_at }}</td>

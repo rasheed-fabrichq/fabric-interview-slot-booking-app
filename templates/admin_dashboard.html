@@ -12,20 +12,37 @@
     </div>
 </div>
 
-<!-- Overall Stats -->
+<!-- Overall Stats. Candidates belong to the drive, not to a job, so the
+     funnel is global; only bookings break down per job. -->
 <div class="row mb-4">
-    <div class="col-md-6">
+    <div class="col-md-3">
         <div class="card bg-primary text-white shadow">
             <div class="card-body">
-                <h5 class="card-title">Total Candidates (All Jobs)</h5>
+                <h6 class="card-title">Total Candidates</h6>
                 <h2 class="card-text">{{ stats.total_candidates }}</h2>
             </div>
         </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-md-3">
+        <div class="card bg-secondary text-white shadow">
+            <div class="card-body">
+                <h6 class="card-title">Not Opened</h6>
+                <h2 class="card-text">{{ stats.pending_count }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-dark shadow">
+            <div class="card-body">
+                <h6 class="card-title">Opened, Not Booked</h6>
+                <h2 class="card-text">{{ stats.clicked_count }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
         <div class="card bg-success text-white shadow">
             <div class="card-body">
-                <h5 class="card-title">Total Bookings (All Jobs)</h5>
+                <h6 class="card-title">Booked</h6>
                 <h2 class="card-text">{{ stats.total_bookings }}</h2>
             </div>
         </div>
@@ -53,47 +70,28 @@
             </div>
             <div class="card-body">
                 <div class="row text-center mb-3">
-                    <div class="col-4">
-                        <h6 class="text-muted small mb-1">Candidates</h6>
-                        <h4 class="text-primary mb-0">{{ job_stat.total_candidates }}</h4>
-                    </div>
-                    <div class="col-4">
+                    <div class="col-6">
                         <h6 class="text-muted small mb-1">Bookings</h6>
                         <h4 class="text-success mb-0">{{ job_stat.total_bookings }}</h4>
                     </div>
-                    <div class="col-4">
-                        <h6 class="text-muted small mb-1">Pending</h6>
-                        <h4 class="text-warning mb-0">{{ job_stat.pending_count or 0 }}</h4>
+                    <div class="col-6">
+                        <h6 class="text-muted small mb-1">Share of all</h6>
+                        <h4 class="text-primary mb-0">
+                            {% if stats.total_bookings > 0 %}
+                                {{ (job_stat.total_bookings / stats.total_bookings * 100)|round(1) }}%
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </h4>
                     </div>
                 </div>
 
                 <hr>
 
-                <div class="mb-3">
-                    <strong>Status Breakdown:</strong>
-                    <div class="progress mt-2" style="height: 25px;">
-                        {% set total = job_stat.total_candidates %}
-                        {% if total > 0 %}
-                        <div class="progress-bar bg-warning" style="width: {{ (job_stat.pending_count or 0) / total * 100 }}%"
-                             title="Pending: {{ job_stat.pending_count or 0 }}">
-                            {{ job_stat.pending_count or 0 }}
-                        </div>
-                        <div class="progress-bar bg-info" style="width: {{ (job_stat.clicked_count or 0) / total * 100 }}%"
-                             title="Clicked: {{ job_stat.clicked_count or 0 }}">
-                            {{ job_stat.clicked_count or 0 }}
-                        </div>
-                        <div class="progress-bar bg-success" style="width: {{ (job_stat.booked_count or 0) / total * 100 }}%"
-                             title="Booked: {{ job_stat.booked_count or 0 }}">
-                            {{ job_stat.booked_count or 0 }}
-                        </div>
-                        {% endif %}
-                    </div>
-                    <small class="text-muted">
-                        <span class="badge bg-warning">Pending</span>
-                        <span class="badge bg-info">Clicked</span>
-                        <span class="badge bg-success">Booked</span>
-                    </small>
-                </div>
+                <p class="small text-muted mb-3">
+                    Candidates are not assigned to a job &mdash; they choose this
+                    position when booking.
+                </p>
 
                 <!-- Per-Job Toggle -->
                 <form method="POST" action="/admin/toggle-job-booking/{{ job_stat.job_id }}">
@@ -192,25 +190,13 @@
                 <h6 class="card-title">
                     <i class="bi bi-people"></i> View Candidates
                 </h6>
-                <p class="card-text small text-muted">All uploaded candidates</p>
+                <p class="card-text small text-muted">All uploaded candidates (200 for the drive)</p>
                 <a href="/admin/candidates" class="btn btn-outline-primary btn-sm w-100 mb-2">
                     <i class="bi bi-list"></i> View All Candidates
                 </a>
-                <div class="btn-group w-100">
-                    <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
-                        <i class="bi bi-filter"></i> Filter by Job
-                    </button>
-                    <ul class="dropdown-menu w-100">
-                        {% for job_stat in stats.job_stats %}
-                        <li>
-                            <a class="dropdown-item" href="/admin/candidates?job_id={{ job_stat.job_id }}">
-                                {{ job_stat.job_name }}
-                                <span class="badge bg-primary float-end">{{ job_stat.total_candidates }}</span>
-                            </a>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
+                <p class="small text-muted mb-0">
+                    Candidates belong to the drive, not to a job.
+                </p>
             </div>
         </div>
     </div>

@@ -3,6 +3,9 @@
 let selectedDate = null;
 let selectedSlotId = null;
 let selectedSlotTime = null;
+// Chosen in step 1 -- the link no longer carries a job.
+let jobId = null;
+let jobName = null;
 
 // Get DOM elements
 const datesGrid = document.getElementById('dates-grid');
@@ -17,15 +20,55 @@ const selectedSlotTimeSpan = document.getElementById('selected-slot-time');
 const confirmBookingBtn = document.getElementById('confirm-booking-btn');
 const changeDateBtn = document.getElementById('change-date-btn');
 const backToDatesBtn = document.getElementById('back-to-dates-btn');
+const jobSelectionContainer = document.getElementById('job-selection-container');
+const jobsGrid = document.getElementById('jobs-grid');
+const selectedJobInfo = document.getElementById('selected-job-info');
+const selectedJobDisplay = document.getElementById('selected-job-display');
+const changeJobBtn = document.getElementById('change-job-btn');
 const candidateId = document.getElementById('candidate-id').value;
-const jobId = document.getElementById('job-id').value;
-const jobName = document.getElementById('job-name').value;
 const bookingToken = document.getElementById('booking-token').value;
 
-// Auto-load dates on page load
+// Step 1 is choosing a position; dates load once a job is picked.
 document.addEventListener('DOMContentLoaded', function() {
-    loadDates();
+    jobsGrid.querySelectorAll('[data-job-id]').forEach(card => {
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', function () {
+            selectJob(this.dataset.jobId, this.dataset.jobName);
+        });
+    });
 });
+
+// Function to select a job and move on to dates
+function selectJob(id, name) {
+    jobId = id;
+    jobName = name;
+
+    selectedJobDisplay.textContent = name;
+    selectedJobInfo.classList.remove('d-none');
+    jobSelectionContainer.classList.add('d-none');
+    dateSelectionContainer.classList.remove('d-none');
+
+    loadDates();
+}
+
+// Go back to the position list, resetting everything downstream
+function backToJobSelection() {
+    jobId = null;
+    jobName = null;
+    selectedDate = null;
+    selectedSlotId = null;
+    selectedSlotTime = null;
+
+    selectedJobInfo.classList.add('d-none');
+    dateSelectionContainer.classList.add('d-none');
+    selectedDateInfo.classList.add('d-none');
+    slotContainer.classList.add('d-none');
+    selectedSlotInfo.style.display = 'none';
+    datesGrid.innerHTML = '';
+    slotsGrid.innerHTML = '';
+
+    jobSelectionContainer.classList.remove('d-none');
+}
 
 // Function to load available dates for the job
 function loadDates() {
@@ -35,7 +78,10 @@ function loadDates() {
 
     // Fetch dates from API
     fetch(`/api/job-dates?job_id=${jobId}`)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load dates');
+            return response.json();
+        })
         .then(dates => {
             loadingSpinner.classList.add('d-none');
             displayDates(dates);
@@ -122,6 +168,9 @@ changeDateBtn.addEventListener('click', backToDateSelection);
 // Event listener for "Back to Dates" button (shown in slot selection screen)
 backToDatesBtn.addEventListener('click', backToDateSelection);
 
+// Change position -- resets date and slot selection too
+changeJobBtn.addEventListener('click', backToJobSelection);
+
 // Function to load available slots for a specific date
 function loadSlots(jobId, date) {
     // Show loading spinner
@@ -131,7 +180,10 @@ function loadSlots(jobId, date) {
 
     // Fetch slots from API
     fetch(`/api/slots?job_id=${jobId}&date=${date}`)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load slots');
+            return response.json();
+        })
         .then(slots => {
             loadingSpinner.classList.add('d-none');
             displaySlots(slots);
@@ -192,7 +244,7 @@ function createSlotCard(slot, available) {
     // Make card clickable if available
     if (isClickable) {
         card.style.cursor = 'pointer';
-        card.onclick = () => selectSlot(slot.id, slot.start_time);
+        card.onclick = () => selectSlot(slot.id, slot.start_time, card);
     }
 
     // Format time display (convert 24h to 12h format)
@@ -219,14 +271,14 @@ function formatTime(time24) {
 }
 
 // Function to select a slot
-function selectSlot(slotId, slotTime) {
+function selectSlot(slotId, slotTime, cardEl) {
     // Remove previous selection
     document.querySelectorAll('.slot-card').forEach(card => {
         card.classList.remove('selected');
     });
 
     // Mark new selection
-    event.currentTarget.classList.add('selected');
+    if (cardEl) cardEl.classList.add('selected');
 
     // Store selected slot
     selectedSlotId = slotId;
@@ -242,6 +294,11 @@ function selectSlot(slotId, slotTime) {
 
 // Event listener for confirm booking button
 confirmBookingBtn.addEventListener('click', function() {
+    if (!jobId) {
+        showError('Please select a position.');
+        return;
+    }
+
     if (!selectedSlotId) {
         showError('Please select a time slot.');
         return;

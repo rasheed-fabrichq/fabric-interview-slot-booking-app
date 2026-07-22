@@ -38,6 +38,17 @@ DEFAULT_SLOT_START_TIME = '10:00'
 DEFAULT_SLOT_END_TIME = '18:00'
 DEFAULT_SLOT_DURATION_MINUTES = 30
 
+# Base URL used to BUILD a candidate's interview link once they pick a
+# job. Interview links are no longer uploaded -- they are constructed as:
+#   <INTERVIEW_LINK_BASE>/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
+# with start_time/end_time appended for the booked window.
+INTERVIEW_LINK_BASE = 'https://app.fabrichq.ai/interview'
+
+
+def build_interview_link(job_id, candidate_id):
+    """Build the interview link for a candidate's chosen job."""
+    return f'{INTERVIEW_LINK_BASE}/{job_id}/?candidate_id={candidate_id}'
+
 # Admin credentials (simple authentication)
 ADMIN_USERNAME = 'admin@fabrichq.ai'
 ADMIN_PASSWORD = 'fabrichqai'  # Change this in production

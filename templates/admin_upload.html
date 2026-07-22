@@ -44,15 +44,11 @@
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                    <div class="mb-3">
-                        <label for="job_id" class="form-label"><strong>Select Job Position</strong></label>
-                        <select class="form-select" id="job_id" name="job_id" required>
-                            <option value="">-- Select a job --</option>
-                            {% for job_id, job_name in jobs.items() %}
-                            <option value="{{ job_id }}">{{ job_name }}</option>
-                            {% endfor %}
-                        </select>
-                        <small class="text-muted">Candidates will be uploaded for this specific job position</small>
+                    <div class="alert alert-info small">
+                        <strong>Upload once for the whole drive.</strong> Candidates are
+                        not tied to a job &mdash; each candidate picks which position
+                        they want when they open their booking link, and may book
+                        only one interview in total.
                     </div>
 
                     <div class="mb-3">
@@ -95,14 +91,15 @@
                 <h5 class="mb-0">Booking Link Format</h5>
             </div>
             <div class="card-body">
-                <p class="small mb-2"><strong>After uploading candidates, send them slot booking links in this format:</strong></p>
-                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book?candidate_id=<span class="text-primary">CANDIDATE_UUID</span>&job_id=<span class="text-success">JOB_UUID</span></pre>
+                <p class="small mb-2"><strong>After uploading, send each candidate their slot booking link:</strong></p>
+                <pre class="bg-light p-2 rounded small">{{ request.host_url|trim('/') }}/book?candidate_id=<span class="text-primary">CANDIDATE_UUID</span></pre>
 
-                <p class="small mb-2 mt-3"><strong>Example for Software Development Engineer I:</strong></p>
-                <pre class="bg-light p-2 rounded small">https://slot-booking.fabrichq.ai/book?candidate_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d&job_id=e34e8e92-95ff-47f5-8e2f-86baa397c2a0</pre>
+                <p class="small mb-2 mt-3">The link carries no job &mdash; candidates choose their position on the booking page.</p>
 
                 <div class="alert alert-warning small mt-3 mb-0">
-                    <strong>Note:</strong> The job_id parameter must match the job you selected during upload. Both job_id and candidate_id must be valid UUIDs.
+                    <strong>Tip:</strong> Use
+                    <a href="/admin/export-pending">Export Non-Booked Candidates</a>
+                    to download a CSV of these links, ready to mail out.
                 </div>
             </div>
         </div>

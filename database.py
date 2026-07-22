@@ -74,20 +74,19 @@ def init_database():
         )
     ''')
 
-    # Create candidates table (with job_id)
+    # Create candidates table.
+    # NOTE: a candidate is NOT tied to a job. One row per person; they
+    # choose which job to interview for at booking time, and that choice
+    # is recorded on the booking. candidate_id is globally unique.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS candidates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            candidate_id TEXT NOT NULL,
-            job_id TEXT NOT NULL,
+            candidate_id TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             email TEXT NOT NULL,
-            interview_link TEXT,
             status TEXT DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(candidate_id, job_id),
-            FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
 
@@ -95,11 +94,6 @@ def init_database():
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_candidate_id
         ON candidates(candidate_id)
-    ''')
-
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_job_id_candidates
-        ON candidates(job_id)
     ''')
 
     # Create slots table.
@@ -125,35 +119,23 @@ def init_database():
         ON slots(date)
     ''')
 
-    # Create bookings table (with job_id, UNIQUE constraint per job)
+    # Create bookings table.
+    # NOTE: UNIQUE(candidate_id) -- ONE booking per person in total, not
+    # one per job. job_id records which job they chose when booking.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS bookings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            candidate_id TEXT NOT NULL,
+            candidate_id TEXT NOT NULL UNIQUE,
             job_id TEXT NOT NULL,
             slot_id INTEGER NOT NULL,
             booked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             email_status TEXT DEFAULT NULL,
             email_sent_at DATETIME DEFAULT NULL,
             email_error TEXT DEFAULT NULL,
-            UNIQUE(candidate_id, job_id),
             FOREIGN KEY (job_id) REFERENCES job_configs(job_id),
             FOREIGN KEY (slot_id) REFERENCES slots(id)
         )
     ''')
-
-    # Migrate existing bookings table to add email columns if missing
-    cursor.execute("PRAGMA table_info(bookings)")
-    booking_columns = [col[1] for col in cursor.fetchall()]
-    if 'email_status' not in booking_columns:
-        cursor.execute(
-            'ALTER TABLE bookings ADD COLUMN email_status TEXT DEFAULT NULL')
-    if 'email_sent_at' not in booking_columns:
-        cursor.execute(
-            'ALTER TABLE bookings ADD COLUMN email_sent_at DATETIME DEFAULT NULL')
-    if 'email_error' not in booking_columns:
-        cursor.execute(
-            'ALTER TABLE bookings ADD COLUMN email_error TEXT DEFAULT NULL')
 
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_booking_candidate
@@ -491,32 +473,33 @@ def delete_interview_date(date, force=False):
 
 # ==================== CANDIDATE FUNCTIONS ====================
 
-def add_candidate(candidate_id, job_id, name, email, interview_link=None):
-    """Add a new candidate to the database"""
+def add_candidate(candidate_id, name, email):
+    """Add a candidate. Candidates are not tied to a job -- they pick one
+    when they book."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute('''
-            INSERT INTO candidates (candidate_id, job_id, name, email, interview_link, status)
-            VALUES (?, ?, ?, ?, ?, 'pending')
-        ''', (candidate_id, job_id, name, email, interview_link))
+            INSERT INTO candidates (candidate_id, name, email, status)
+            VALUES (?, ?, ?, 'pending')
+        ''', (candidate_id, name, email))
         conn.commit()
         conn.close()
         return {'success': True}
     except sqlite3.IntegrityError:
         conn.close()
-        return {'error': 'Candidate already exists for this job'}
+        return {'error': 'Candidate already exists'}
 
 
-def get_candidate(candidate_id, job_id):
-    """Get candidate details by candidate_id and job_id"""
+def get_candidate(candidate_id):
+    """Get candidate details by candidate_id."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
-        SELECT * FROM candidates WHERE candidate_id = ? AND job_id = ?
-    ''', (candidate_id, job_id))
+        SELECT * FROM candidates WHERE candidate_id = ?
+    ''', (candidate_id,))
 
     candidate = cursor.fetchone()
     conn.close()
@@ -526,7 +509,7 @@ def get_candidate(candidate_id, job_id):
     return None
 
 
-def update_candidate_status(candidate_id, job_id, status):
+def update_candidate_status(candidate_id, status):
     """Update candidate status"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -534,51 +517,43 @@ def update_candidate_status(candidate_id, job_id, status):
     cursor.execute('''
         UPDATE candidates
         SET status = ?, updated_at = ?
-        WHERE candidate_id = ? AND job_id = ?
-    ''', (status, datetime.now(), candidate_id, job_id))
+        WHERE candidate_id = ?
+    ''', (status, datetime.now(), candidate_id))
 
     conn.commit()
     conn.close()
 
 
 def get_all_candidates(job_id=None):
-    """Get all candidates with their details, optionally filtered by job"""
+    """Get all candidates.
+
+    Candidates are not tied to a job. job_id, when given, filters to those
+    who BOOKED that job -- the only job association a candidate has.
+    booked_job_name is NULL until they book.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    query = '''
+        SELECT
+            c.candidate_id,
+            c.name,
+            c.email,
+            c.status,
+            c.created_at,
+            c.updated_at,
+            b.job_id as booked_job_id,
+            jc.job_name as booked_job_name
+        FROM candidates c
+        LEFT JOIN bookings b ON c.candidate_id = b.candidate_id
+        LEFT JOIN job_configs jc ON b.job_id = jc.job_id
+    '''
+
     if job_id:
-        cursor.execute('''
-            SELECT
-                c.candidate_id,
-                c.job_id,
-                c.name,
-                c.email,
-                c.interview_link,
-                c.status,
-                c.created_at,
-                c.updated_at,
-                jc.job_name
-            FROM candidates c
-            LEFT JOIN job_configs jc ON c.job_id = jc.job_id
-            WHERE c.job_id = ?
-            ORDER BY c.created_at DESC
-        ''', (job_id,))
+        cursor.execute(query + ' WHERE b.job_id = ? ORDER BY c.created_at DESC',
+                       (job_id,))
     else:
-        cursor.execute('''
-            SELECT
-                c.candidate_id,
-                c.job_id,
-                c.name,
-                c.email,
-                c.interview_link,
-                c.status,
-                c.created_at,
-                c.updated_at,
-                jc.job_name
-            FROM candidates c
-            LEFT JOIN job_configs jc ON c.job_id = jc.job_id
-            ORDER BY c.created_at DESC
-        ''')
+        cursor.execute(query + ' ORDER BY c.created_at DESC')
 
     candidates = [dict(row) for row in cursor.fetchall()]
     conn.close()
@@ -776,15 +751,15 @@ def clear_all_slots(force=False):
 
 # ==================== BOOKING FUNCTIONS ====================
 
-def get_candidate_booking_for_job(candidate_id, job_id):
-    """Check if candidate already has a booking for this specific job"""
+def has_booking(candidate_id):
+    """Check whether this person has booked at all (any job)."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
         SELECT COUNT(*) as count FROM bookings
-        WHERE candidate_id = ? AND job_id = ?
-    ''', (candidate_id, job_id))
+        WHERE candidate_id = ?
+    ''', (candidate_id,))
 
     result = cursor.fetchone()
     conn.close()
@@ -801,14 +776,15 @@ def book_slot(candidate_id, job_id, slot_id):
         with get_db_transaction() as conn:
             cursor = conn.cursor()
 
-            # Check if candidate already has a booking for THIS JOB
+            # One booking per person in total: booking any job closes out
+            # all of them.
             cursor.execute('''
                 SELECT COUNT(*) as count FROM bookings
-                WHERE candidate_id = ? AND job_id = ?
-            ''', (candidate_id, job_id))
+                WHERE candidate_id = ?
+            ''', (candidate_id,))
 
             if cursor.fetchone()['count'] > 0:
-                return {'error': 'You have already booked a slot for this job.'}
+                return {'error': 'You have already booked an interview slot.'}
 
             # Get slot details with lock
             cursor.execute('''
@@ -852,8 +828,8 @@ def book_slot(candidate_id, job_id, slot_id):
             cursor.execute('''
                 UPDATE candidates
                 SET status = 'booked', updated_at = ?
-                WHERE candidate_id = ? AND job_id = ?
-            ''', (datetime.now(), candidate_id, job_id))
+                WHERE candidate_id = ?
+            ''', (datetime.now(), candidate_id))
 
             return {
                 'success': True,
@@ -870,8 +846,8 @@ def book_slot(candidate_id, job_id, slot_id):
         return {'error': f'An error occurred: {str(e)}'}
 
 
-def get_booking_by_candidate_and_job(candidate_id, job_id):
-    """Get booking details for a specific candidate and job"""
+def get_booking_by_candidate(candidate_id):
+    """Get this person's booking, whichever job they chose."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -885,11 +861,11 @@ def get_booking_by_candidate_and_job(candidate_id, job_id):
             s.start_time,
             b.booked_at
         FROM bookings b
-        JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
+        JOIN candidates c ON b.candidate_id = c.candidate_id
         JOIN slots s ON b.slot_id = s.id
         JOIN job_configs jc ON b.job_id = jc.job_id
-        WHERE b.candidate_id = ? AND b.job_id = ?
-    ''', (candidate_id, job_id))
+        WHERE b.candidate_id = ?
+    ''', (candidate_id,))
 
     booking = cursor.fetchone()
     conn.close()
@@ -910,7 +886,6 @@ def get_all_bookings(job_id=None):
                 c.candidate_id,
                 c.name,
                 c.email,
-                c.interview_link,
                 jc.job_name,
                 b.job_id,
                 s.date,
@@ -921,7 +896,7 @@ def get_all_bookings(job_id=None):
                 b.email_sent_at,
                 b.email_error
             FROM bookings b
-            JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
+            JOIN candidates c ON b.candidate_id = c.candidate_id
             JOIN slots s ON b.slot_id = s.id
             JOIN job_configs jc ON b.job_id = jc.job_id
             WHERE b.job_id = ?
@@ -933,7 +908,6 @@ def get_all_bookings(job_id=None):
                 c.candidate_id,
                 c.name,
                 c.email,
-                c.interview_link,
                 jc.job_name,
                 b.job_id,
                 s.date,
@@ -944,7 +918,7 @@ def get_all_bookings(job_id=None):
                 b.email_sent_at,
                 b.email_error
             FROM bookings b
-            JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
+            JOIN candidates c ON b.candidate_id = c.candidate_id
             JOIN slots s ON b.slot_id = s.id
             JOIN job_configs jc ON b.job_id = jc.job_id
             ORDER BY b.booked_at
@@ -956,7 +930,7 @@ def get_all_bookings(job_id=None):
     return bookings
 
 
-def update_booking_email_status(candidate_id, job_id, status, error=None):
+def update_booking_email_status(candidate_id, status, error=None):
     """Update the confirmation email send status for a booking.
 
     status: 'sent' | 'failed'
@@ -967,14 +941,14 @@ def update_booking_email_status(candidate_id, job_id, status, error=None):
     cursor.execute('''
         UPDATE bookings
         SET email_status = ?, email_sent_at = ?, email_error = ?
-        WHERE candidate_id = ? AND job_id = ?
-    ''', (status, datetime.now(), error, candidate_id, job_id))
+        WHERE candidate_id = ?
+    ''', (status, datetime.now(), error, candidate_id))
 
     conn.commit()
     conn.close()
 
 
-def get_booking_with_details(candidate_id, job_id):
+def get_booking_with_details(candidate_id):
     """Get full booking details needed for sending confirmation email."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -984,7 +958,6 @@ def get_booking_with_details(candidate_id, job_id):
             c.candidate_id,
             c.name,
             c.email,
-            c.interview_link,
             jc.job_name,
             b.job_id,
             s.date,
@@ -995,11 +968,11 @@ def get_booking_with_details(candidate_id, job_id):
             b.email_sent_at,
             b.email_error
         FROM bookings b
-        JOIN candidates c ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
+        JOIN candidates c ON b.candidate_id = c.candidate_id
         JOIN slots s ON b.slot_id = s.id
         JOIN job_configs jc ON b.job_id = jc.job_id
-        WHERE b.candidate_id = ? AND b.job_id = ?
-    ''', (candidate_id, job_id))
+        WHERE b.candidate_id = ?
+    ''', (candidate_id,))
 
     row = cursor.fetchone()
     conn.close()
@@ -1013,35 +986,40 @@ def get_dashboard_stats():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get stats per job - using subqueries to avoid JOIN issues
+    # Per-job stats. Candidates are not tied to a job, so the only
+    # per-job number that exists is how many people BOOKED that job.
     cursor.execute('''
         SELECT
             jc.job_id,
             jc.job_name,
             jc.booking_enabled,
-            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id) as total_candidates,
-            (SELECT COUNT(*) FROM bookings WHERE job_id = jc.job_id) as total_bookings,
-            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id AND status = 'pending') as pending_count,
-            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id AND status = 'clicked') as clicked_count,
-            (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id AND status = 'booked') as booked_count
+            (SELECT COUNT(*) FROM bookings WHERE job_id = jc.job_id) as total_bookings
         FROM job_configs jc
         ORDER BY jc.created_at
     ''')
 
     job_stats = [dict(row) for row in cursor.fetchall()]
 
-    # Get overall totals
+    # Overall candidate funnel (across the whole pool, not per job)
     cursor.execute('SELECT COUNT(*) as total FROM candidates')
     total_candidates = cursor.fetchone()['total']
 
     cursor.execute('SELECT COUNT(*) as total FROM bookings')
     total_bookings = cursor.fetchone()['total']
 
+    cursor.execute('''
+        SELECT status, COUNT(*) as count FROM candidates GROUP BY status
+    ''')
+    status_counts = {row['status']: row['count'] for row in cursor.fetchall()}
+
     conn.close()
 
     return {
         'total_candidates': total_candidates,
         'total_bookings': total_bookings,
+        'pending_count': status_counts.get('pending', 0),
+        'clicked_count': status_counts.get('clicked', 0),
+        'booked_count': status_counts.get('booked', 0),
         'job_stats': job_stats
     }
 
