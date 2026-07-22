@@ -49,37 +49,18 @@
                                    placeholder="e.g., Software Development Engineer I" required>
                         </div>
 
-                        <div class="mb-3">
-                            <label class="form-label"><strong>Slot Start Time</strong></label>
-                            <input type="time" name="start_time" class="form-control" value="08:00">
-                            <small class="text-muted">Default: 08:00</small>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label"><strong>Slot End Time</strong></label>
-                            <input type="time" name="end_time" class="form-control" value="00:00">
-                            <small class="text-muted">Use 00:00 for midnight (end of day). Default: 00:00</small>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label"><strong>Slot Duration (minutes)</strong></label>
-                            <select name="duration" class="form-select">
-                                <option value="15">15 minutes</option>
-                                <option value="30">30 minutes</option>
-                                <option value="40">40 minutes</option>
-                                <option value="45">45 minutes</option>
-                                <option value="60" selected>60 minutes</option>
-                                <option value="90">90 minutes</option>
-                                <option value="120">120 minutes</option>
-                            </select>
-                            <small class="text-muted">Default: 60 minutes</small>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label"><strong>Capacity per Slot</strong></label>
-                            <input type="number" name="capacity" class="form-control"
-                                   value="15" min="1" max="100">
-                            <small class="text-muted">Max candidates per slot. Default: 15</small>
+                        <div class="alert alert-info small">
+                            <strong>Scheduling is shared.</strong>
+                            This job will automatically use the same interview
+                            window, slot length, capacity and dates as every other
+                            job:
+                            <ul class="mb-1 mt-2">
+                                <li>{{ config.slot_start_time }} &ndash; {{ config.slot_end_time }}</li>
+                                <li>{{ config.slot_duration_minutes }} minute slots</li>
+                                <li>{{ config.capacity_per_slot }} concurrent interviews per slot, across all jobs</li>
+                            </ul>
+                            Change these in
+                            <a href="{{ url_for('admin_job_config') }}">Slot Configuration</a>.
                         </div>
 
                         <button type="submit" class="btn btn-success w-100">

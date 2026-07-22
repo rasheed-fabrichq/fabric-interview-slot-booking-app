@@ -1,13 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Job Configuration - Admin{% endblock %}
+{% block title %}Slot Configuration - Admin{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
     <div class="row mb-4">
         <div class="col-12">
-            <h2>Job Configuration</h2>
-            <p class="text-muted">Configure slot settings for each job (time range, duration, capacity)</p>
+            <h2>Slot Configuration</h2>
+            <p class="text-muted">
+                Interview window, slot length and capacity. These apply to
+                <strong>every job</strong> &mdash; all jobs share one pool of slots.
+            </p>
         </div>
     </div>
 
@@ -26,73 +29,108 @@
     {% endif %}
 
     <div class="row">
-        {% for job_id, job_name in jobs.items() %}
-        {% set config = configs|selectattr('job_id', 'equalto', job_id)|first %}
-        <div class="col-md-4 mb-4">
+        <div class="col-lg-7 mb-4">
             <div class="card shadow">
                 <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">{{ job_name }}</h5>
+                    <h5 class="mb-0">Shared Slot Settings</h5>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="{{ url_for('admin_job_config') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="job_id" value="{{ job_id }}">
 
-                        <div class="mb-3">
-                            <label class="form-label"><strong>Slot Start Time</strong></label>
-                            <input type="time" name="start_time" class="form-control"
-                                   value="{{ config.slot_start_time if config else '08:00' }}" required>
-                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label"><strong>Slot Start Time</strong></label>
+                                <input type="time" name="start_time" class="form-control"
+                                       value="{{ config.slot_start_time }}" required>
+                            </div>
 
-                        <div class="mb-3">
-                            <label class="form-label"><strong>Slot End Time</strong></label>
-                            <input type="time" name="end_time" class="form-control"
-                                   value="{{ config.slot_end_time if config else '00:00' }}" required>
-                            <small class="text-muted">Use 00:00 for midnight (end of day)</small>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label"><strong>Slot End Time</strong></label>
+                                <input type="time" name="end_time" class="form-control"
+                                       value="{{ config.slot_end_time }}" required>
+                                <small class="text-muted">Use 00:00 for midnight (end of day)</small>
+                            </div>
                         </div>
 
                         <div class="mb-3">
                             <label class="form-label"><strong>Slot Duration (minutes)</strong></label>
                             <select name="duration" class="form-select" required>
-                                <option value="15" {% if config and config.slot_duration_minutes == 15 %}selected{% endif %}>15 minutes</option>
-                                <option value="30" {% if config and config.slot_duration_minutes == 30 %}selected{% endif %}>30 minutes</option>
-                                <option value="40" {% if config and config.slot_duration_minutes == 40 %}selected{% endif %}>40 minutes</option>
-                                <option value="45" {% if config and config.slot_duration_minutes == 45 %}selected{% endif %}>45 minutes</option>
-                                <option value="60" {% if config and config.slot_duration_minutes == 60 %}selected{% endif %}>60 minutes</option>
-                                <option value="90" {% if config and config.slot_duration_minutes == 90 %}selected{% endif %}>90 minutes</option>
-                                <option value="120" {% if config and config.slot_duration_minutes == 120 %}selected{% endif %}>120 minutes</option>
+                                {% for mins in [15, 30, 40, 45, 60, 90, 120] %}
+                                <option value="{{ mins }}"
+                                    {% if config.slot_duration_minutes == mins %}selected{% endif %}>
+                                    {{ mins }} minutes
+                                </option>
+                                {% endfor %}
                             </select>
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label"><strong>Capacity per Slot</strong></label>
+                            <label class="form-label"><strong>Concurrent Interviews per Slot</strong></label>
                             <input type="number" name="capacity" class="form-control"
-                                   value="{{ config.capacity_per_slot if config else 10 }}"
-                                   min="1" max="100" required>
-                            <small class="text-muted">Max candidates per slot</small>
+                                   value="{{ config.capacity_per_slot }}"
+                                   min="1" max="500" required>
+                            <small class="text-muted">
+                                Total interviews that can run at the same time, counted
+                                across all jobs combined.
+                            </small>
                         </div>
 
-                        {% if config %}
                         <div class="alert alert-info small">
-                            <strong>Current:</strong> {{ config.slot_duration_minutes }} min slots, capacity {{ config.capacity_per_slot }}
+                            <strong>Current:</strong>
+                            {{ config.slot_start_time }} &ndash; {{ config.slot_end_time }},
+                            {{ config.slot_duration_minutes }} min slots,
+                            {{ config.capacity_per_slot }} concurrent interviews per slot.
                         </div>
-                        {% endif %}
 
                         <button type="submit" class="btn btn-primary w-100">
-                            <i class="bi bi-save"></i> Update Configuration
+                            Update Configuration
                         </button>
                     </form>
                 </div>
             </div>
         </div>
-        {% endfor %}
+
+        <div class="col-lg-5 mb-4">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <h6 class="mb-0">How shared slots work</h6>
+                </div>
+                <div class="card-body small">
+                    <p>
+                        Every job draws from the same pool of interview slots. When a
+                        candidate books 14:00 for any job, that seat is consumed for
+                        <strong>all</strong> jobs.
+                    </p>
+                    <p class="mb-0">
+                        With a capacity of {{ config.capacity_per_slot }}, at most
+                        {{ config.capacity_per_slot }} interviews run in any one slot,
+                        no matter how the candidates are spread across jobs.
+                    </p>
+                </div>
+            </div>
+
+            {% if jobs %}
+            <div class="card shadow-sm mt-3">
+                <div class="card-header">
+                    <h6 class="mb-0">Jobs using this configuration ({{ jobs|length }})</h6>
+                </div>
+                <ul class="list-group list-group-flush small">
+                    {% for job_id, job_name in jobs.items() %}
+                    <li class="list-group-item">{{ job_name }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
     </div>
 
-    <div class="row mt-4">
+    <div class="row mt-2">
         <div class="col-12">
             <div class="alert alert-warning">
-                <strong>⚠️ Warning:</strong> Changing configuration will not affect already initialized slots.
-                Clear and re-initialize slots after changing configuration.
+                <strong>Warning:</strong> Changing this configuration does not affect
+                slots that have already been initialized. Clear and re-initialize slots
+                for changes to take effect.
             </div>
         </div>
     </div>
@@ -100,7 +138,7 @@
     <div class="row">
         <div class="col-12">
             <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">
-                <i class="bi bi-arrow-left"></i> Back to Dashboard
+                Back to Dashboard
             </a>
         </div>
     </div>

@@ -139,14 +139,17 @@ CONFIRMATION_EMAIL_TEMPLATE = """<!DOCTYPE html>
                                             <tr>
                                                 <td>
                                                     <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: 700; color: #662237; text-transform: uppercase; letter-spacing: 1px;">Your Session Details</p>
+                                                    <p style="margin: 0 0 8px 0; font-size: 15px; color: #2D2D2F;">
+                                                        <strong>Position:</strong> {{Job Name}}
+                                                    </p>
                                                     <p style="margin: 0; font-size: 15px; color: #2D2D2F;">
-                                                        <strong>Date:</strong> 14th March, Saturday, 2026
+                                                        <strong>Date:</strong> {{Slot Date}}
                                                     </p>
                                                     <p style="margin: 8px 0; font-size: 15px; color: #2D2D2F;">
                                                         <strong>Time:</strong> {{Start Time}} - {{End Time}} IST
                                                     </p>
                                                     <p style="margin: 0; font-size: 15px; color: #2D2D2F;">
-                                                        <strong>Duration:</strong> 40 Minutes
+                                                        <strong>Duration:</strong> {{Duration}}
                                                     </p>
                                                 </td>
                                             </tr>
@@ -306,21 +309,28 @@ def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=N
 
 def send_booking_confirmation(candidate_name, candidate_email, job_name,
                                slot_date, day_of_week, start_time, end_time,
-                               interview_link_with_expiry, company_name=None):
+                               interview_link_with_expiry, company_name=None,
+                               duration_minutes=None):
     """
     Send a booking confirmation email to a candidate after they book a slot.
+
+    Every candidate-visible value is substituted into the template; nothing
+    about the slot is hardcoded in the HTML.
 
     Returns: (success: bool, error_message: str | None)
     """
     effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
     reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
-    subject = f"Interview With Meesho Confirmed – {slot_date} {start_time} IST"
+    duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
+    subject = f"{job_name} Interview Confirmed – {slot_date} {start_time} IST"
 
     html_content = (CONFIRMATION_EMAIL_TEMPLATE
         .replace('{{Candidate Name}}', candidate_name)
-        .replace('{{Slot Date}}', f'{slot_date} ({day_of_week})')
+        .replace('{{Job Name}}', job_name)
+        .replace('{{Slot Date}}', f'{day_of_week}, {slot_date}')
         .replace('{{Start Time}}', start_time)
         .replace('{{End Time}}', end_time)
+        .replace('{{Duration}}', duration_text)
         .replace('{{Unique Interview Link}}', interview_link_with_expiry)
     )
 

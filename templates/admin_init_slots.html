@@ -6,8 +6,15 @@
 <div class="row">
     <div class="col-12">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>Initialize AI Discussion Slots</h2>
-            <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
+            <div>
+                <h2>Initialize Interview Slots</h2>
+                <p class="text-muted mb-0">
+                    One shared pool of slots, used by every job.
+                </p>
+            </div>
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-primary">
+                Back to Dashboard
+            </a>
         </div>
     </div>
 </div>
@@ -26,66 +33,134 @@
 </div>
 {% endif %}
 
+{% if confirm_clear %}
+<div class="card border-danger mb-4">
+    <div class="card-header bg-danger text-white">
+        <h5 class="mb-0">Confirm: clear all slots</h5>
+    </div>
+    <div class="card-body">
+        <p>
+            This will permanently delete
+            <strong>{{ confirm_clear_count }} booking(s)</strong> across
+            <strong>all jobs</strong>, remove every slot, and reset those
+            candidates to <em>pending</em>. Confirmation emails already sent
+            will not be retracted.
+        </p>
+        <form method="POST" action="{{ url_for('admin_clear_slots') }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="confirm" value="yes">
+            <button type="submit" class="btn btn-danger"
+                    onclick="return confirm('Permanently delete {{ confirm_clear_count }} booking(s) across all jobs? This cannot be undone.')">
+                Yes, delete {{ confirm_clear_count }} booking(s) and clear slots
+            </button>
+        </form>
+        <a href="{{ url_for('admin_init_slots') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</div>
+{% endif %}
+
 <div class="row">
-    {% for job_id, job_name in jobs.items() %}
-    {% set config = configs|selectattr('job_id', 'equalto', job_id)|first %}
-    <div class="col-md-4 mb-4">
+    <div class="col-lg-6 mb-4">
         <div class="card shadow h-100">
             <div class="card-header bg-success text-white">
-                <h5 class="mb-0">{{ job_name }}</h5>
+                <h5 class="mb-0">Shared Slot Pool</h5>
             </div>
             <div class="card-body">
-                {% if config %}
                 <div class="mb-3">
-                    <strong>Configuration:</strong>
+                    <strong>Configuration (all jobs):</strong>
                     <ul class="small mb-2">
-                        <li>Time: {{ config.slot_start_time }} - {{ config.slot_end_time }}</li>
+                        <li>Time: {{ config.slot_start_time }} &ndash; {{ config.slot_end_time }}</li>
                         <li>Duration: {{ config.slot_duration_minutes }} minutes</li>
-                        <li>Capacity: {{ config.capacity_per_slot }} per slot</li>
+                        <li>Capacity: {{ config.capacity_per_slot }} concurrent interviews per slot</li>
+                        <li>Interview dates: {{ dates|length }}</li>
+                        <li>Slots currently generated: {{ slots|length }}</li>
                     </ul>
                 </div>
 
-                <div class="alert alert-info small mb-3">
-                    This will create time slots for all configured dates for this job.
+                {% if not dates %}
+                <div class="alert alert-warning small mb-3">
+                    No interview dates configured. Add dates before initializing slots.
                 </div>
+                {% else %}
+                <div class="alert alert-info small mb-3">
+                    Creates slots for every configured date. Dates that already have
+                    slots are left untouched, so this is safe to re-run after adding
+                    a new date.
+                </div>
+                {% endif %}
 
                 <form method="POST" action="{{ url_for('admin_init_slots') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="job_id" value="{{ job_id }}">
                     <button type="submit" class="btn btn-success w-100 mb-2"
-                            onclick="return confirm('Initialize slots for {{ job_name }}?')">
-                        <i class="bi bi-lightning-fill"></i> Initialize Slots
+                            {% if not dates %}disabled{% endif %}>
+                        Initialize Slots
                     </button>
                 </form>
 
                 <form method="POST" action="{{ url_for('admin_clear_slots') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="job_id" value="{{ job_id }}">
                     <button type="submit" class="btn btn-outline-danger btn-sm w-100"
-                            onclick="return confirm('Clear all slots and bookings for {{ job_name }}? This cannot be undone!')">
-                        <i class="bi bi-trash"></i> Clear Slots
+                            onclick="return confirm('Clear ALL slots for ALL jobs? Any existing bookings will be cancelled.')">
+                        Clear All Slots
                     </button>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">
+                <h6 class="mb-0">Configured Dates</h6>
+            </div>
+            <div class="card-body p-0">
+                {% if dates %}
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Day</th>
+                            <th>Window</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for d in dates %}
+                        <tr>
+                            <td>{{ d.date }}</td>
+                            <td>{{ d.day_of_week }}</td>
+                            <td class="small">
+                                {% if d.slot_start_time and d.slot_end_time %}
+                                    {{ d.slot_start_time }} &ndash; {{ d.slot_end_time }}
+                                {% else %}
+                                    <span class="text-muted">
+                                        {{ config.slot_start_time }} &ndash; {{ config.slot_end_time }} (default)
+                                    </span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
                 {% else %}
-                <div class="alert alert-warning small">
-                    Configuration not found for this job.
+                <div class="p-3 text-muted small">
+                    No dates yet.
+                    <a href="{{ url_for('admin_job_dates') }}">Add interview dates</a>.
                 </div>
                 {% endif %}
             </div>
         </div>
     </div>
-    {% endfor %}
 </div>
 
-<div class="row mt-4">
+<div class="row mt-2">
     <div class="col-12">
         <div class="alert alert-warning">
-            <strong>⚠️ Important Notes:</strong>
+            <strong>Important:</strong>
             <ul class="mb-0">
                 <li>Slots must be initialized before candidates can book</li>
-                <li>Ensure job configuration and dates are set before initializing</li>
-                <li>Clearing slots will delete all bookings for that job</li>
-                <li>You can initialize each job independently</li>
+                <li>Set the slot configuration and dates before initializing</li>
+                <li>Slots are shared: a booking from any job consumes capacity for all jobs</li>
+                <li>Clearing slots deletes bookings for <strong>every</strong> job, not just one</li>
             </ul>
         </div>
     </div>

@@ -5,7 +5,10 @@ import sqlite3
 import os
 from datetime import datetime
 from contextlib import contextmanager
-from config import DATABASE_PATH
+from config import (
+    DATABASE_PATH, DEFAULT_SLOT_CAPACITY, DEFAULT_SLOT_START_TIME,
+    DEFAULT_SLOT_END_TIME, DEFAULT_SLOT_DURATION_MINUTES
+)
 
 
 def get_db_connection():
@@ -40,44 +43,36 @@ def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Create job_configs table
+    # Create job_configs table.
+    # NOTE: scheduling (window, duration, capacity, dates) is NO LONGER
+    # per-job -- it lives in the settings table and interview_dates,
+    # because all jobs share one slot pool. A job row now only carries
+    # its identity and its own booking on/off switch.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS job_configs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id TEXT UNIQUE NOT NULL,
             job_name TEXT NOT NULL,
-            slot_start_time TEXT NOT NULL,
-            slot_end_time TEXT NOT NULL,
-            slot_duration_minutes INTEGER NOT NULL,
-            capacity_per_slot INTEGER NOT NULL,
             booking_enabled INTEGER DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
 
-    # Create job_dates table
+    # Create interview_dates table.
+    # NOTE: dates are SHARED ACROSS ALL JOBS, same as slots. One row per
+    # date. slot_start_time/slot_end_time optionally override the global
+    # window for that particular day.
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS job_dates (
+        CREATE TABLE IF NOT EXISTS interview_dates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id TEXT NOT NULL,
-            date TEXT NOT NULL,
+            date TEXT NOT NULL UNIQUE,
             day_of_week TEXT NOT NULL,
             slot_start_time TEXT,
             slot_end_time TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(job_id, date),
-            FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-
-    # Add columns to existing job_dates table if they don't exist (for migration)
-    cursor.execute("PRAGMA table_info(job_dates)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'slot_start_time' not in columns:
-        cursor.execute('ALTER TABLE job_dates ADD COLUMN slot_start_time TEXT')
-    if 'slot_end_time' not in columns:
-        cursor.execute('ALTER TABLE job_dates ADD COLUMN slot_end_time TEXT')
 
     # Create candidates table (with job_id)
     cursor.execute('''
@@ -107,24 +102,22 @@ def init_database():
         ON candidates(job_id)
     ''')
 
-    # Create slots table (with job_id and date)
+    # Create slots table.
+    # NOTE: slots are SHARED ACROSS ALL JOBS. There is exactly one row per
+    # (date, start_time) and its booked_count is the total number of
+    # interviews booked in that window regardless of which job the
+    # candidate applied for. Capacity is the global 'slot_capacity'
+    # setting, not job_configs.capacity_per_slot.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS slots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id TEXT NOT NULL,
             date TEXT NOT NULL,
             day_of_week TEXT NOT NULL,
             start_time TEXT NOT NULL,
             booked_count INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(job_id, date, start_time),
-            FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
+            UNIQUE(date, start_time)
         )
-    ''')
-
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_job_id_slots
-        ON slots(job_id)
     ''')
 
     cursor.execute('''
@@ -181,14 +174,30 @@ def init_database():
         )
     ''')
 
-    # Initialize default settings
+    # Initialize default settings.
+    # slot_capacity / slot_start_time / slot_end_time / slot_duration_minutes
+    # are GLOBAL: they apply to every job, because all jobs share one pool
+    # of interview slots.
     cursor.execute('''
         INSERT OR IGNORE INTO settings (key, value)
         VALUES ('booking_enabled', 'true')
     ''')
 
-    # Seed initial job configurations
-    seed_job_configs(cursor)
+    cursor.execute('''
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('slot_capacity', ?)
+    ''', (str(DEFAULT_SLOT_CAPACITY),))
+
+    cursor.execute('''
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('slot_start_time', ?)
+    ''', (DEFAULT_SLOT_START_TIME,))
+
+    cursor.execute('''
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('slot_end_time', ?)
+    ''', (DEFAULT_SLOT_END_TIME,))
+
+    cursor.execute('''
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('slot_duration_minutes', ?)
+    ''', (str(DEFAULT_SLOT_DURATION_MINUTES),))
 
     conn.commit()
     conn.close()
@@ -196,54 +205,68 @@ def init_database():
     print("Database initialized successfully!")
 
 
-def seed_job_configs(cursor):
-    """Seed initial job configurations (only if they don't exist)"""
-    jobs = [
-        # {
-        #     'job_id': 'fc4c9c14-208c-427a-be2e-4d0080f286d6',
-        #     'job_name': 'Software Development Engineer I',
-        #     'start_time': '08:00',
-        #     'end_time': '00:00',
-        #     'duration': 60,
-        #     'capacity': 20,
-        #     'dates': []  # Dates will be added by admin
-        # },
-        # {
-        #     'job_id': 'b4f5ea74-a44a-4c93-a0f2-08abfaa337ed',
-        #     'job_name': 'Data Scientist – I',
-        #     'start_time': '08:00',
-        #     'end_time': '00:00',
-        #     'duration': 60,
-        #     'capacity': 15,
-        #     'dates': []  # Dates will be added by admin
-        # },
-        {
-            'job_id': '5f36361d-5ffe-4535-8fa7-34c84c294383',
-            'job_name': 'Senior Associate – Business Management',
-            'start_time': '12:00',
-            'end_time': '00:00',
-            'duration': 40,
-            'capacity': 30,
-            'dates': []  # Dates will be added by admin
-        }
-    ]
+# ==================== GLOBAL SLOT CONFIGURATION ====================
+#
+# All jobs share one pool of interview slots, so the interview window,
+# slot length and per-slot capacity are single global values rather than
+# per-job settings.
 
-    for job in jobs:
-        # Insert job config (ignore if already exists)
-        cursor.execute('''
-            INSERT OR IGNORE INTO job_configs
-            (job_id, job_name, slot_start_time, slot_end_time,
-             slot_duration_minutes, capacity_per_slot, booking_enabled)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-        ''', (job['job_id'], job['job_name'], job['start_time'],
-              job['end_time'], job['duration'], job['capacity']))
+def get_setting(key, default=None):
+    """Read a single value from the settings table."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
 
-        # Add dates for each job
-        for date, day in job['dates']:
-            cursor.execute('''
-                INSERT OR IGNORE INTO job_dates (job_id, date, day_of_week)
-                VALUES (?, ?, ?)
-            ''', (job['job_id'], date, day))
+    cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+    row = cursor.fetchone()
+    conn.close()
+
+    return row['value'] if row else default
+
+
+def set_setting(key, value):
+    """Write a single value to the settings table."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        INSERT OR REPLACE INTO settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+    ''', (key, str(value), datetime.now()))
+
+    conn.commit()
+    conn.close()
+
+    return {'success': True}
+
+
+def get_slot_capacity():
+    """Number of concurrent interviews allowed per slot, across ALL jobs."""
+    return int(get_setting('slot_capacity', DEFAULT_SLOT_CAPACITY))
+
+
+def get_slot_config():
+    """Get the global slot configuration shared by every job."""
+    return {
+        'slot_start_time': get_setting('slot_start_time', DEFAULT_SLOT_START_TIME),
+        'slot_end_time': get_setting('slot_end_time', DEFAULT_SLOT_END_TIME),
+        'slot_duration_minutes': int(get_setting(
+            'slot_duration_minutes', DEFAULT_SLOT_DURATION_MINUTES)),
+        'capacity_per_slot': get_slot_capacity(),
+    }
+
+
+def update_slot_config(start_time, end_time, duration, capacity):
+    """Update the global slot configuration.
+
+    Does not touch slots that have already been initialized -- clear and
+    re-initialize for changes to take effect.
+    """
+    set_setting('slot_start_time', start_time)
+    set_setting('slot_end_time', end_time)
+    set_setting('slot_duration_minutes', duration)
+    set_setting('slot_capacity', capacity)
+
+    return {'success': True}
 
 
 # ==================== JOB CONFIGURATION FUNCTIONS ====================
@@ -260,18 +283,20 @@ def get_all_jobs():
     return jobs
 
 
-def create_job(job_id, job_name, start_time='08:00', end_time='00:00', duration=60, capacity=15):
-    """Create a new job configuration"""
+def create_job(job_id, job_name):
+    """Create a new job.
+
+    Scheduling is global (see get_slot_config), so a job carries no
+    window/duration/capacity of its own.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute('''
-            INSERT INTO job_configs
-            (job_id, job_name, slot_start_time, slot_end_time,
-             slot_duration_minutes, capacity_per_slot, booking_enabled)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-        ''', (job_id, job_name, start_time, end_time, duration, capacity))
+            INSERT INTO job_configs (job_id, job_name, booking_enabled)
+            VALUES (?, ?, 1)
+        ''', (job_id, job_name))
         conn.commit()
         conn.close()
         return {'success': True}
@@ -281,7 +306,12 @@ def create_job(job_id, job_name, start_time='08:00', end_time='00:00', duration=
 
 
 def get_job_config(job_id):
-    """Get job configuration"""
+    """Get a job's details, merged with the global slot configuration.
+
+    The slot fields are included so existing callers that read
+    slot_duration_minutes / capacity_per_slot keep working; they are the
+    same for every job.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -293,41 +323,21 @@ def get_job_config(job_id):
     conn.close()
 
     if config:
-        return dict(config)
+        return {**dict(config), **get_slot_config()}
     return None
 
 
-def update_job_config(job_id, start_time, end_time, duration, capacity):
-    """Update job configuration"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        UPDATE job_configs
-        SET slot_start_time = ?,
-            slot_end_time = ?,
-            slot_duration_minutes = ?,
-            capacity_per_slot = ?,
-            updated_at = ?
-        WHERE job_id = ?
-    ''', (start_time, end_time, duration, capacity, datetime.now(), job_id))
-
-    conn.commit()
-    conn.close()
-
-    return {'success': True}
-
-
 def get_all_job_configs():
-    """Get all job configurations"""
+    """Get all jobs, each merged with the global slot configuration."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('SELECT * FROM job_configs ORDER BY created_at')
-    configs = [dict(row) for row in cursor.fetchall()]
+    rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
-    return configs
+    slot_config = get_slot_config()
+    return [{**row, **slot_config} for row in rows]
 
 
 def is_booking_enabled_for_job(job_id):
@@ -368,16 +378,17 @@ def set_job_booking_enabled(job_id, enabled):
 
 # ==================== JOB DATES FUNCTIONS ====================
 
-def get_job_dates(job_id):
-    """Get all dates for a specific job with optional time overrides"""
+def get_interview_dates():
+    """Get all interview dates (shared by every job), with optional
+    per-date time overrides."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
-        SELECT date, day_of_week, slot_start_time, slot_end_time FROM job_dates
-        WHERE job_id = ?
-        ORDER BY date
-    ''', (job_id,))
+        SELECT date, day_of_week, slot_start_time, slot_end_time
+        FROM interview_dates
+        ORDER BY substr(date, 7, 4), substr(date, 4, 2), substr(date, 1, 2)
+    ''')
 
     dates = [dict(row) for row in cursor.fetchall()]
     conn.close()
@@ -385,34 +396,35 @@ def get_job_dates(job_id):
     return dates
 
 
-def add_job_date(job_id, date, day_of_week, start_time=None, end_time=None):
-    """Add a new interview date for a job with optional custom time range"""
+def add_interview_date(date, day_of_week, start_time=None, end_time=None):
+    """Add an interview date, optionally overriding the global window."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute('''
-            INSERT INTO job_dates (job_id, date, day_of_week, slot_start_time, slot_end_time)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (job_id, date, day_of_week, start_time, end_time))
+            INSERT INTO interview_dates
+            (date, day_of_week, slot_start_time, slot_end_time)
+            VALUES (?, ?, ?, ?)
+        ''', (date, day_of_week, start_time, end_time))
         conn.commit()
         conn.close()
         return {'success': True}
     except sqlite3.IntegrityError:
         conn.close()
-        return {'error': 'This date already exists for this job'}
+        return {'error': 'This date has already been added'}
 
 
-def update_job_date_times(job_id, date, start_time, end_time):
-    """Update time range for a specific date"""
+def update_interview_date_times(date, start_time, end_time):
+    """Override the interview window for one date."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
-        UPDATE job_dates
+        UPDATE interview_dates
         SET slot_start_time = ?, slot_end_time = ?
-        WHERE job_id = ? AND date = ?
-    ''', (start_time, end_time, job_id, date))
+        WHERE date = ?
+    ''', (start_time, end_time, date))
 
     conn.commit()
     conn.close()
@@ -420,25 +432,61 @@ def update_job_date_times(job_id, date, start_time, end_time):
     return {'success': True}
 
 
-def delete_job_date(job_id, date):
-    """Delete an interview date for a job"""
+def count_bookings_on_date(date):
+    """How many bookings exist on a date, across all jobs.
+
+    Used to warn before destructive actions.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # First delete any slots for this date
     cursor.execute('''
-        DELETE FROM slots WHERE job_id = ? AND date = ?
-    ''', (job_id, date))
+        SELECT COUNT(*) as count
+        FROM bookings b
+        JOIN slots s ON b.slot_id = s.id
+        WHERE s.date = ?
+    ''', (date,))
 
-    # Then delete the date
+    count = cursor.fetchone()['count']
+    conn.close()
+
+    return count
+
+
+def delete_interview_date(date, force=False):
+    """Delete an interview date and its slots.
+
+    Slots are shared across all jobs, so this destroys bookings belonging
+    to every job on that date. Refuses to run when bookings exist unless
+    force=True.
+    """
+    existing_bookings = count_bookings_on_date(date)
+    if existing_bookings > 0 and not force:
+        return {
+            'error': (
+                f'{existing_bookings} booking(s) already exist on {date}, '
+                f'across all jobs. Deleting this date would cancel them. '
+                f'Confirm the deletion to proceed.'
+            ),
+            'booking_count': existing_bookings,
+        }
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Bookings reference slots, so clear them first.
     cursor.execute('''
-        DELETE FROM job_dates WHERE job_id = ? AND date = ?
-    ''', (job_id, date))
+        DELETE FROM bookings
+        WHERE slot_id IN (SELECT id FROM slots WHERE date = ?)
+    ''', (date,))
+
+    cursor.execute('DELETE FROM slots WHERE date = ?', (date,))
+    cursor.execute('DELETE FROM interview_dates WHERE date = ?', (date,))
 
     conn.commit()
     conn.close()
 
-    return {'success': True}
+    return {'success': True, 'bookings_deleted': existing_bookings}
 
 
 # ==================== CANDIDATE FUNCTIONS ====================
@@ -563,95 +611,86 @@ def generate_slot_times(start_time, end_time, duration_minutes):
     return slots
 
 
-def initialize_slots_for_job(job_id):
-    """Initialize all time slots for a specific job (supports per-date time ranges)"""
+def initialize_slots():
+    """Create the shared slot pool for every configured interview date.
+
+    Slots are shared across all jobs, so this runs once globally rather
+    than per job. Only adds slots for dates that do not have them yet, so
+    it is safe to re-run after adding a new date.
+    """
+    config = get_slot_config()
+    dates = get_interview_dates()
+
+    if not dates:
+        return {'error': 'No interview dates configured. Add a date first.'}
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get job configuration (default times and duration)
-    cursor.execute('''
-        SELECT slot_start_time, slot_end_time, slot_duration_minutes
-        FROM job_configs WHERE job_id = ?
-    ''', (job_id,))
-
-    config = cursor.fetchone()
-    if not config:
-        conn.close()
-        return {'error': 'Job configuration not found'}
-
-    # Get all dates for this job (with optional time overrides)
-    cursor.execute('''
-        SELECT date, day_of_week, slot_start_time, slot_end_time FROM job_dates WHERE job_id = ?
-    ''', (job_id,))
-
-    dates = cursor.fetchall()
-    if not dates:
-        conn.close()
-        return {'error': 'No dates configured for this job'}
-
-    # Check if slots already exist for this job
-    cursor.execute('SELECT COUNT(*) as count FROM slots WHERE job_id = ?', (job_id,))
-    count = cursor.fetchone()['count']
-
-    if count > 0:
-        conn.close()
-        return {'error': f'Slots already initialized for this job. Clear existing slots first.'}
-
-    # Insert slots for each date
     slots_inserted = 0
+    dates_skipped = []
+
     for date_row in dates:
         date = date_row['date']
         day_of_week = date_row['day_of_week']
 
-        # Use date-specific times if available, otherwise fall back to job config
-        date_start_time = date_row['slot_start_time'] or config['slot_start_time']
-        date_end_time = date_row['slot_end_time'] or config['slot_end_time']
+        # Skip dates that already have slots so existing bookings and
+        # their booked_count are never disturbed.
+        cursor.execute('SELECT COUNT(*) as count FROM slots WHERE date = ?', (date,))
+        if cursor.fetchone()['count'] > 0:
+            dates_skipped.append(date)
+            continue
 
-        # Generate slot times for this specific date
+        # Per-date overrides fall back to the global window.
         slot_times = generate_slot_times(
-            date_start_time,
-            date_end_time,
+            date_row['slot_start_time'] or config['slot_start_time'],
+            date_row['slot_end_time'] or config['slot_end_time'],
             config['slot_duration_minutes']
         )
 
         for start_time in slot_times:
             cursor.execute('''
-                INSERT INTO slots (job_id, date, day_of_week, start_time, booked_count)
-                VALUES (?, ?, ?, ?, 0)
-            ''', (job_id, date, day_of_week, start_time))
+                INSERT INTO slots (date, day_of_week, start_time, booked_count)
+                VALUES (?, ?, ?, 0)
+            ''', (date, day_of_week, start_time))
             slots_inserted += 1
 
     conn.commit()
     conn.close()
 
-    return {'success': True, 'slots_created': slots_inserted}
+    if slots_inserted == 0 and dates_skipped:
+        return {
+            'error': (
+                'All configured dates already have slots. Clear them first '
+                'if you want to regenerate with a new configuration.'
+            )
+        }
+
+    return {
+        'success': True,
+        'slots_created': slots_inserted,
+        'dates_skipped': dates_skipped,
+    }
 
 
-def get_slots_by_job_and_date(job_id, date):
-    """Get all slots for a specific job and date with availability"""
+def get_slots_by_date(date):
+    """Get the shared slots for a date, with availability.
+
+    booked_count covers bookings from every job.
+    """
+    max_capacity = get_slot_capacity()
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get job capacity
     cursor.execute('''
-        SELECT capacity_per_slot FROM job_configs WHERE job_id = ?
-    ''', (job_id,))
-
-    config = cursor.fetchone()
-    if not config:
-        conn.close()
-        return []
-
-    max_capacity = config['capacity_per_slot']
-
-    cursor.execute('''
-        SELECT id, job_id, date, day_of_week, start_time, booked_count,
+        SELECT id, date, day_of_week, start_time, booked_count,
                ? as max_capacity,
-               (? - booked_count) as available
+               MAX(0, ? - booked_count) as available
         FROM slots
-        WHERE job_id = ? AND date = ?
+        WHERE date = ?
         ORDER BY start_time
-    ''', (max_capacity, max_capacity, job_id, date))
+    ''', (max_capacity, max_capacity, date))
 
     slots = [dict(row) for row in cursor.fetchall()]
     conn.close()
@@ -659,34 +698,23 @@ def get_slots_by_job_and_date(job_id, date):
     return slots
 
 
-def get_all_slots_for_job(job_id):
-    """Get all slots for a specific job grouped by date with booking statistics"""
+def get_all_slots():
+    """Get every slot in the shared pool with booking statistics."""
+    config = get_slot_config()
+    max_capacity = config['capacity_per_slot']
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get job capacity
     cursor.execute('''
-        SELECT capacity_per_slot, slot_duration_minutes FROM job_configs WHERE job_id = ?
-    ''', (job_id,))
-
-    config = cursor.fetchone()
-    if not config:
-        conn.close()
-        return []
-
-    max_capacity = config['capacity_per_slot']
-    slot_duration = config['slot_duration_minutes']
-
-    # Get all slots for this job
-    cursor.execute('''
-        SELECT id, job_id, date, day_of_week, start_time, booked_count,
+        SELECT id, date, day_of_week, start_time, booked_count,
                ? as max_capacity,
-               (? - booked_count) as available,
+               MAX(0, ? - booked_count) as available,
                ? as slot_duration_minutes
         FROM slots
-        WHERE job_id = ?
-        ORDER BY date, start_time
-    ''', (max_capacity, max_capacity, slot_duration, job_id))
+        ORDER BY substr(date, 7, 4), substr(date, 4, 2), substr(date, 1, 2),
+                 start_time
+    ''', (max_capacity, max_capacity, config['slot_duration_minutes']))
 
     slots = [dict(row) for row in cursor.fetchall()]
     conn.close()
@@ -694,28 +722,56 @@ def get_all_slots_for_job(job_id):
     return slots
 
 
-def clear_slots_for_job(job_id):
-    """Clear all slots for a specific job"""
+def count_all_bookings():
+    """Total bookings across every job and date."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Delete bookings for this job first
-    cursor.execute('DELETE FROM bookings WHERE job_id = ?', (job_id,))
+    cursor.execute('SELECT COUNT(*) as count FROM bookings')
+    count = cursor.fetchone()['count']
+    conn.close()
 
-    # Delete slots
-    cursor.execute('DELETE FROM slots WHERE job_id = ?', (job_id,))
+    return count
 
-    # Reset candidate statuses for this job
+
+def clear_all_slots(force=False):
+    """Delete the entire shared slot pool, all bookings, and reset
+    candidate statuses.
+
+    Slots are shared, so there is no per-job version of this -- it wipes
+    scheduling for all 16 jobs at once. Refuses to run while bookings
+    exist unless force=True.
+    """
+    existing_bookings = count_all_bookings()
+    if existing_bookings > 0 and not force:
+        return {
+            'error': (
+                f'{existing_bookings} booking(s) exist across all jobs. '
+                f'Clearing slots cancels every one of them and resets those '
+                f'candidates to pending. Confirm to proceed.'
+            ),
+            'booking_count': existing_bookings,
+        }
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('DELETE FROM bookings')
+    cursor.execute('DELETE FROM slots')
     cursor.execute('''
         UPDATE candidates
         SET status = 'pending', updated_at = ?
-        WHERE job_id = ? AND status != 'pending'
-    ''', (datetime.now(), job_id))
+        WHERE status != 'pending'
+    ''', (datetime.now(),))
 
     conn.commit()
     conn.close()
 
-    return {'success': True, 'message': f'All slots and bookings cleared for job {job_id}'}
+    return {
+        'success': True,
+        'bookings_deleted': existing_bookings,
+        'message': 'All slots and bookings cleared.',
+    }
 
 
 # ==================== BOOKING FUNCTIONS ====================
@@ -756,7 +812,7 @@ def book_slot(candidate_id, job_id, slot_id):
 
             # Get slot details with lock
             cursor.execute('''
-                SELECT id, booked_count, start_time, date, job_id
+                SELECT id, booked_count, start_time, date
                 FROM slots
                 WHERE id = ?
             ''', (slot_id,))
@@ -766,17 +822,14 @@ def book_slot(candidate_id, job_id, slot_id):
             if not slot:
                 return {'error': 'Invalid slot selected.'}
 
-            # Verify slot belongs to the correct job
-            if slot['job_id'] != job_id:
-                return {'error': 'Invalid slot for this job.'}
-
-            # Get job capacity
-            cursor.execute('''
-                SELECT capacity_per_slot FROM job_configs WHERE job_id = ?
-            ''', (job_id,))
-
-            config = cursor.fetchone()
-            max_capacity = config['capacity_per_slot']
+            # Capacity is global: booked_count already counts bookings
+            # made from every job, so this check enforces the shared
+            # concurrency limit across all of them.
+            cursor.execute(
+                "SELECT value FROM settings WHERE key = 'slot_capacity'")
+            capacity_row = cursor.fetchone()
+            max_capacity = (int(capacity_row['value'])
+                            if capacity_row else DEFAULT_SLOT_CAPACITY)
 
             # Check availability
             if slot['booked_count'] >= max_capacity:
@@ -863,7 +916,6 @@ def get_all_bookings(job_id=None):
                 s.date,
                 s.day_of_week,
                 s.start_time,
-                jc.slot_duration_minutes,
                 b.booked_at,
                 b.email_status,
                 b.email_sent_at,
@@ -887,7 +939,6 @@ def get_all_bookings(job_id=None):
                 s.date,
                 s.day_of_week,
                 s.start_time,
-                jc.slot_duration_minutes,
                 b.booked_at,
                 b.email_status,
                 b.email_sent_at,
@@ -939,7 +990,6 @@ def get_booking_with_details(candidate_id, job_id):
             s.date,
             s.day_of_week,
             s.start_time,
-            jc.slot_duration_minutes,
             b.booked_at,
             b.email_status,
             b.email_sent_at,

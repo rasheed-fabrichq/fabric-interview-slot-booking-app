@@ -250,21 +250,12 @@
                 <h6 class="card-title">
                     <i class="bi bi-clock-history"></i> View Slots
                 </h6>
-                <p class="card-text small text-muted">Time slots & booking counts</p>
-                <div class="btn-group w-100">
-                    <button type="button" class="btn btn-outline-info btn-sm dropdown-toggle" data-bs-toggle="dropdown">
-                        <i class="bi bi-calendar3"></i> Select Job
-                    </button>
-                    <ul class="dropdown-menu w-100">
-                        {% for job_stat in stats.job_stats %}
-                        <li>
-                            <a class="dropdown-item" href="/admin/slots?job_id={{ job_stat.job_id }}">
-                                {{ job_stat.job_name }}
-                            </a>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
+                <p class="card-text small text-muted">
+                    Shared time slots &amp; booking counts (all jobs)
+                </p>
+                <a href="{{ url_for('admin_slots') }}" class="btn btn-outline-info btn-sm w-100">
+                    <i class="bi bi-calendar3"></i> View Slots
+                </a>
             </div>
         </div>
     </div>

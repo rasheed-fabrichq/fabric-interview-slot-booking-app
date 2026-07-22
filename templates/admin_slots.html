@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}View Slots - {{ job_name }}{% endblock %}
+{% block title %}View Slots{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -35,26 +35,18 @@
 <div class="row">
     <div class="col-12">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>View Slots: {{ job_name }}</h2>
             <div>
-                <!-- Job Selection Dropdown -->
-                <div class="btn-group me-2">
-                    <button type="button" class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
-                        Select Different Job
-                    </button>
-                    <ul class="dropdown-menu">
-                        {% for job_id, job_name in jobs.items() %}
-                        <li>
-                            <a class="dropdown-item {% if job_id == selected_job %}active{% endif %}"
-                               href="/admin/slots?job_id={{ job_id }}">
-                                {{ job_name }}
-                            </a>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                <a href="/admin/dashboard" class="btn btn-outline-secondary">Back to Dashboard</a>
+                <h2>View Slots</h2>
+                <p class="text-muted mb-0">
+                    One shared pool used by all jobs &mdash; booked counts combine
+                    bookings from every job.
+                    Capacity {{ config.capacity_per_slot }} per
+                    {{ config.slot_duration_minutes }} min slot.
+                </p>
             </div>
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+                Back to Dashboard
+            </a>
         </div>
     </div>
 </div>

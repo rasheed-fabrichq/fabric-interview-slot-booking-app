@@ -21,15 +21,16 @@ from functools import wraps
 # Import from local modules
 from database import (
     init_database, add_candidate, get_candidate, update_candidate_status,
-    get_slots_by_job_and_date, book_slot, get_all_bookings,
-    initialize_slots_for_job, get_dashboard_stats,
-    get_booking_by_candidate_and_job, clear_slots_for_job,
+    get_slots_by_date, book_slot, get_all_bookings,
+    initialize_slots, get_dashboard_stats,
+    get_booking_by_candidate_and_job, clear_all_slots,
     is_booking_enabled, set_booking_enabled, get_all_candidates,
-    get_job_config, get_all_job_configs, update_job_config,
-    get_job_dates, add_job_date, delete_job_date,
+    get_job_config, get_all_job_configs,
+    get_interview_dates, add_interview_date, delete_interview_date,
     is_booking_enabled_for_job, set_job_booking_enabled,
-    get_candidate_booking_for_job, get_all_slots_for_job,
-    create_job, update_job_date_times,
+    get_candidate_booking_for_job, get_all_slots,
+    create_job, update_interview_date_times,
+    get_slot_config, update_slot_config,
     update_booking_email_status, get_booking_with_details
 )
 from config import (
@@ -92,6 +93,7 @@ def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, sl
             start_time=start_time_fmt,
             end_time=end_time_fmt,
             interview_link_with_expiry=interview_link_with_expiry,
+            duration_minutes=slot_duration,
         )
 
         if success:
@@ -305,7 +307,11 @@ def booking_form():
 
 @app.route('/api/job-dates')
 def get_job_dates_api():
-    """API endpoint to get available dates for a specific job"""
+    """Available interview dates.
+
+    Dates are shared by every job; job_id is still accepted and validated
+    so existing booking links keep working.
+    """
     job_id = request.args.get('job_id')
 
     if not job_id:
@@ -314,13 +320,16 @@ def get_job_dates_api():
     if not is_valid_job_id(job_id):
         return jsonify({'error': 'Invalid job_id'}), 400
 
-    dates = get_job_dates(job_id)
-    return jsonify(dates)
+    return jsonify(get_interview_dates())
 
 
 @app.route('/api/slots')
 def get_slots_api():
-    """API endpoint to get available slots for a specific job and date"""
+    """Available slots for a date.
+
+    Slots are shared across all jobs, so availability already accounts
+    for bookings made from every other job.
+    """
     job_id = request.args.get('job_id')
     date = request.args.get('date')
 
@@ -333,8 +342,7 @@ def get_slots_api():
     if not is_valid_job_id(job_id):
         return jsonify({'error': 'Invalid job_id'}), 400
 
-    slots = get_slots_by_job_and_date(job_id, date)
-    return jsonify(slots)
+    return jsonify(get_slots_by_date(date))
 
 
 @app.route('/book/confirm', methods=['POST'])
@@ -625,25 +633,22 @@ def admin_upload():
 @app.route('/admin/job-config', methods=['GET', 'POST'])
 @admin_required
 def admin_job_config():
-    """Configure job settings (time range, duration, capacity)"""
+    """Configure the global slot settings shared by every job.
+
+    Window, duration and capacity apply to all jobs at once, because they
+    all draw from one shared pool of interview slots.
+    """
     if request.method == 'POST':
-        job_id = request.form.get('job_id')
         start_time = request.form.get('start_time')
         end_time = request.form.get('end_time')
         duration = request.form.get('duration')
         capacity = request.form.get('capacity')
 
-        if not all([job_id, start_time, end_time, duration, capacity]):
+        if not all([start_time, end_time, duration, capacity]):
             return render_template('admin_job_config.html',
                                  error='All fields are required',
                                  jobs=get_jobs(),
-                                 configs=get_all_job_configs())
-
-        if not is_valid_job_id(job_id):
-            return render_template('admin_job_config.html',
-                                 error='Invalid job ID',
-                                 jobs=get_jobs(),
-                                 configs=get_all_job_configs())
+                                 config=get_slot_config())
 
         try:
             duration_int = int(duration)
@@ -652,157 +657,167 @@ def admin_job_config():
             if duration_int <= 0 or capacity_int <= 0:
                 raise ValueError("Duration and capacity must be positive")
 
-            update_job_config(job_id, start_time, end_time, duration_int, capacity_int)
+            update_slot_config(start_time, end_time, duration_int, capacity_int)
 
-            return render_template('admin_job_config.html',
-                                 success=f'Configuration updated for {get_job_name(job_id)}',
-                                 jobs=get_jobs(),
-                                 configs=get_all_job_configs())
+            return render_template(
+                'admin_job_config.html',
+                success=('Slot configuration updated for all jobs. '
+                         'Clear and re-initialize slots for changes to '
+                         'affect already-generated slots.'),
+                jobs=get_jobs(),
+                config=get_slot_config())
 
         except ValueError as e:
             return render_template('admin_job_config.html',
                                  error=f'Invalid input: {str(e)}',
                                  jobs=get_jobs(),
-                                 configs=get_all_job_configs())
+                                 config=get_slot_config())
 
     return render_template('admin_job_config.html',
                          jobs=get_jobs(),
-                         configs=get_all_job_configs())
+                         config=get_slot_config())
 
 
 @app.route('/admin/job-dates', methods=['GET', 'POST'])
 @admin_required
 def admin_job_dates():
-    """Manage interview dates for each job"""
+    """Manage interview dates. Dates are shared by every job."""
+
+    def render(**kwargs):
+        return render_template('admin_job_dates.html',
+                               dates=get_interview_dates(),
+                               config=get_slot_config(),
+                               **kwargs)
+
     if request.method == 'POST':
         action = request.form.get('action')
-        job_id = request.form.get('job_id')
-
-        if not is_valid_job_id(job_id):
-            return render_template('admin_job_dates.html',
-                                 error='Invalid job ID',
-                                 jobs=get_jobs(),
-                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
         if action == 'add':
-            date_str = request.form.get('date')  # Format: yyyy-mm-dd from date input
-            start_time = request.form.get('start_time')  # Optional custom start time
-            end_time = request.form.get('end_time')  # Optional custom end time
+            date_str = request.form.get('date')  # yyyy-mm-dd from date input
+            start_time = request.form.get('start_time')  # optional override
+            end_time = request.form.get('end_time')      # optional override
 
             if not date_str:
-                return render_template('admin_job_dates.html',
-                                     error='Date is required',
-                                     jobs=get_jobs(),
-                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+                return render(error='Date is required')
 
             try:
-                # Convert yyyy-mm-dd to dd-mm-yyyy and get day of week
                 date_obj = datetime.strptime(date_str, '%Y-%m-%d')
                 formatted_date = date_obj.strftime('%d-%m-%Y')
                 day_of_week = date_obj.strftime('%A')
-
-                # Only pass start/end time if they are provided (not empty strings)
-                custom_start = start_time if start_time and start_time.strip() else None
-                custom_end = end_time if end_time and end_time.strip() else None
-
-                result = add_job_date(job_id, formatted_date, day_of_week, custom_start, custom_end)
-
-                if 'error' in result:
-                    return render_template('admin_job_dates.html',
-                                         error=result['error'],
-                                         jobs=get_jobs(),
-                                         all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
-
-                time_info = ""
-                if custom_start and custom_end:
-                    time_info = f" (Custom times: {custom_start} - {custom_end})"
-
-                return render_template('admin_job_dates.html',
-                                     success=f'Date {formatted_date} ({day_of_week}){time_info} added to {get_job_name(job_id)}',
-                                     jobs=get_jobs(),
-                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
-
             except ValueError:
-                return render_template('admin_job_dates.html',
-                                     error='Invalid date format',
-                                     jobs=get_jobs(),
-                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+                return render(error='Invalid date format')
+
+            # Only treat times as overrides when actually provided
+            custom_start = start_time if start_time and start_time.strip() else None
+            custom_end = end_time if end_time and end_time.strip() else None
+
+            result = add_interview_date(formatted_date, day_of_week,
+                                        custom_start, custom_end)
+
+            if 'error' in result:
+                return render(error=result['error'])
+
+            time_info = ""
+            if custom_start and custom_end:
+                time_info = f" (Custom times: {custom_start} - {custom_end})"
+
+            return render(
+                success=(f'Date {formatted_date} ({day_of_week}){time_info} '
+                         f'added. Initialize slots to generate its time slots.'))
 
         elif action == 'update_times':
-            date = request.form.get('date')  # Format: dd-mm-yyyy
+            date = request.form.get('date')  # dd-mm-yyyy
             start_time = request.form.get('start_time')
             end_time = request.form.get('end_time')
 
             if not all([date, start_time, end_time]):
-                return render_template('admin_job_dates.html',
-                                     error='Date, start time, and end time are required',
-                                     jobs=get_jobs(),
-                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+                return render(
+                    error='Date, start time, and end time are required')
 
-            update_job_date_times(job_id, date, start_time, end_time)
+            update_interview_date_times(date, start_time, end_time)
 
-            return render_template('admin_job_dates.html',
-                                 success=f'Time range updated for {date}: {start_time} - {end_time}',
-                                 jobs=get_jobs(),
-                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+            return render(
+                success=(f'Time range updated for {date}: {start_time} - '
+                         f'{end_time}. Clear and re-initialize slots for this '
+                         f'to take effect.'))
 
         elif action == 'delete':
-            date = request.form.get('date')  # Format: dd-mm-yyyy
+            date = request.form.get('date')  # dd-mm-yyyy
+            confirmed = request.form.get('confirm') == 'yes'
 
-            delete_job_date(job_id, date)
+            # Slots are shared, so deleting a date cancels bookings across
+            # every job. delete_interview_date refuses unless confirmed.
+            result = delete_interview_date(date, force=confirmed)
 
-            return render_template('admin_job_dates.html',
-                                 success=f'Date {date} removed from {get_job_name(job_id)}',
-                                 jobs=get_jobs(),
-                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+            if 'error' in result:
+                return render(error=result['error'],
+                              confirm_delete_date=date,
+                              confirm_delete_count=result.get('booking_count'))
 
-    return render_template('admin_job_dates.html',
-                         jobs=get_jobs(),
-                         all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+            deleted = result.get('bookings_deleted', 0)
+            note = (f' {deleted} booking(s) across all jobs were cancelled.'
+                    if deleted else '')
+            return render(success=f'Date {date} removed.{note}')
+
+    return render()
 
 
 @app.route('/admin/init-slots', methods=['GET', 'POST'])
 @admin_required
 def admin_init_slots():
-    """Initialize slots for a specific job"""
+    """Initialize the shared slot pool used by every job."""
+
+    def render(**kwargs):
+        return render_template('admin_init_slots.html',
+                               dates=get_interview_dates(),
+                               config=get_slot_config(),
+                               slots=get_all_slots(),
+                               **kwargs)
+
     if request.method == 'POST':
-        job_id = request.form.get('job_id')
-
-        if not is_valid_job_id(job_id):
-            return render_template('admin_init_slots.html',
-                                 error='Invalid job ID',
-                                 jobs=get_jobs(),
-                                 configs=get_all_job_configs())
-
-        result = initialize_slots_for_job(job_id)
+        result = initialize_slots()
 
         if 'error' in result:
-            return render_template('admin_init_slots.html',
-                                 error=result['error'],
-                                 jobs=get_jobs(),
-                                 configs=get_all_job_configs())
+            return render(error=result['error'])
 
-        return render_template('admin_init_slots.html',
-                             success=f"{result['slots_created']} slots initialized successfully for {get_job_name(job_id)}!",
-                             jobs=get_jobs(),
-                             configs=get_all_job_configs())
+        skipped = result.get('dates_skipped') or []
+        note = (f" {len(skipped)} date(s) already had slots and were left "
+                f"untouched." if skipped else "")
+        return render(
+            success=(f"{result['slots_created']} slots initialized, shared "
+                     f"across all jobs.{note}"))
 
-    return render_template('admin_init_slots.html',
-                         jobs=get_jobs(),
-                         configs=get_all_job_configs())
+    return render()
 
 
 @app.route('/admin/clear-slots', methods=['POST'])
 @admin_required
 def admin_clear_slots():
-    """Clear all slots for a specific job (for testing/reset)"""
-    job_id = request.form.get('job_id')
+    """Clear the entire shared slot pool.
 
-    if not is_valid_job_id(job_id):
-        return redirect(url_for('admin_init_slots'))
+    Slots are shared, so this wipes scheduling for every job at once and
+    cancels all bookings. Requires explicit confirmation when bookings
+    exist.
+    """
+    confirmed = request.form.get('confirm') == 'yes'
+    result = clear_all_slots(force=confirmed)
 
-    clear_slots_for_job(job_id)
-    return redirect(url_for('admin_init_slots'))
+    if 'error' in result:
+        return render_template('admin_init_slots.html',
+                               error=result['error'],
+                               confirm_clear=True,
+                               confirm_clear_count=result.get('booking_count'),
+                               dates=get_interview_dates(),
+                               config=get_slot_config(),
+                               slots=get_all_slots())
+
+    deleted = result.get('bookings_deleted', 0)
+    note = f' {deleted} booking(s) were cancelled.' if deleted else ''
+    return render_template('admin_init_slots.html',
+                           success=f'All slots cleared.{note}',
+                           dates=get_interview_dates(),
+                           config=get_slot_config(),
+                           slots=get_all_slots())
 
 
 @app.route('/admin/toggle-booking', methods=['POST'])
@@ -1016,17 +1031,13 @@ def admin_resend_email(candidate_id, job_id):
 @app.route('/admin/slots')
 @admin_required
 def admin_slots():
-    """View all slots with booking statistics for a specific job"""
-    job_id = request.args.get('job_id')  # Required job filter
+    """View the shared slot pool with booking statistics.
 
-    if not job_id or not is_valid_job_id(job_id):
-        # If no valid job selected, redirect to dashboard
-        return redirect(url_for('admin_dashboard'))
+    There is one pool for all jobs, so this is not filtered by job.
+    """
+    all_slots = get_all_slots()
 
-    # Get all slots for the selected job
-    all_slots = get_all_slots_for_job(job_id)
-
-    # Group slots by date for better display
+    # Group slots by date for display
     slots_by_date = {}
     for slot in all_slots:
         date = slot['date']
@@ -1042,14 +1053,12 @@ def admin_slots():
         slots_by_date[date]['total_capacity'] += slot['max_capacity']
         slots_by_date[date]['total_booked'] += slot['booked_count']
 
-    # Convert to sorted list
-    dates_data = sorted(slots_by_date.values(), key=lambda x: x['date'])
+    # get_all_slots already returns rows in date/time order
+    dates_data = list(slots_by_date.values())
 
     return render_template('admin_slots.html',
                          dates_data=dates_data,
-                         jobs=get_jobs(),
-                         selected_job=job_id,
-                         job_name=get_job_name(job_id))
+                         config=get_slot_config())
 
 
 @app.route('/admin/jobs', methods=['GET', 'POST'])
@@ -1059,49 +1068,39 @@ def admin_jobs():
     if request.method == 'POST':
         job_id = request.form.get('job_id')
         job_name = request.form.get('job_name')
-        start_time = request.form.get('start_time', '08:00')
-        end_time = request.form.get('end_time', '00:00')
-        duration = request.form.get('duration', '60')
-        capacity = request.form.get('capacity', '15')
 
         if not all([job_id, job_name]):
             return render_template('admin_jobs.html',
                                  error='Job ID and Job Name are required',
-                                 jobs=get_jobs())
+                                 jobs=get_jobs(),
+                                 config=get_slot_config())
 
         # Validate UUID format
         try:
-            from uuid import UUID
             UUID(str(job_id).strip(), version=4)
         except (ValueError, AttributeError):
             return render_template('admin_jobs.html',
                                  error='Job ID must be a valid UUID (e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6)',
-                                 jobs=get_jobs())
+                                 jobs=get_jobs(),
+                                 config=get_slot_config())
 
-        try:
-            duration_int = int(duration)
-            capacity_int = int(capacity)
+        # Scheduling is global -- a new job automatically uses the shared
+        # window, duration, capacity and dates.
+        result = create_job(job_id.strip(), job_name.strip())
 
-            if duration_int <= 0 or capacity_int <= 0:
-                raise ValueError("Duration and capacity must be positive")
-
-            result = create_job(job_id.strip(), job_name.strip(), start_time, end_time, duration_int, capacity_int)
-
-            if 'error' in result:
-                return render_template('admin_jobs.html',
-                                     error=result['error'],
-                                     jobs=get_jobs())
-
+        if 'error' in result:
             return render_template('admin_jobs.html',
-                                 success=f'Job "{job_name}" created successfully!',
-                                 jobs=get_jobs())
+                                 error=result['error'],
+                                 jobs=get_jobs(),
+                                 config=get_slot_config())
 
-        except ValueError as e:
-            return render_template('admin_jobs.html',
-                                 error=f'Invalid input: {str(e)}',
-                                 jobs=get_jobs())
+        return render_template('admin_jobs.html',
+                             success=f'Job "{job_name}" created successfully!',
+                             jobs=get_jobs(),
+                             config=get_slot_config())
 
-    return render_template('admin_jobs.html', jobs=get_jobs())
+    return render_template('admin_jobs.html', jobs=get_jobs(),
+                           config=get_slot_config())
 
 
 # Error handlers
