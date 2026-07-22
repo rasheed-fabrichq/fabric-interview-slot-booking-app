@@ -21,7 +21,8 @@ const confirmBookingBtn = document.getElementById('confirm-booking-btn');
 const changeDateBtn = document.getElementById('change-date-btn');
 const backToDatesBtn = document.getElementById('back-to-dates-btn');
 const jobSelectionContainer = document.getElementById('job-selection-container');
-const jobsGrid = document.getElementById('jobs-grid');
+const jobSelect = document.getElementById('job-select');
+const jobContinueBtn = document.getElementById('job-continue-btn');
 const selectedJobInfo = document.getElementById('selected-job-info');
 const selectedJobDisplay = document.getElementById('selected-job-display');
 const changeJobBtn = document.getElementById('change-job-btn');
@@ -30,11 +31,15 @@ const bookingToken = document.getElementById('booking-token').value;
 
 // Step 1 is choosing a position; dates load once a job is picked.
 document.addEventListener('DOMContentLoaded', function() {
-    jobsGrid.querySelectorAll('[data-job-id]').forEach(card => {
-        card.style.cursor = 'pointer';
-        card.addEventListener('click', function () {
-            selectJob(this.dataset.jobId, this.dataset.jobName);
-        });
+    // Continue stays disabled until a real position is chosen
+    jobSelect.addEventListener('change', function () {
+        jobContinueBtn.disabled = !this.value;
+    });
+
+    jobContinueBtn.addEventListener('click', function () {
+        if (!jobSelect.value) return;
+        const option = jobSelect.options[jobSelect.selectedIndex];
+        selectJob(jobSelect.value, option.textContent.trim());
     });
 });
 
@@ -67,6 +72,8 @@ function backToJobSelection() {
     datesGrid.innerHTML = '';
     slotsGrid.innerHTML = '';
 
+    // Re-arm the picker with the previous choice still shown
+    jobContinueBtn.disabled = !jobSelect.value;
     jobSelectionContainer.classList.remove('d-none');
 }
 

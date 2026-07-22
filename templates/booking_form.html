@@ -36,18 +36,21 @@
                         Choose the position you want to interview for. You may book
                         only one interview in total.
                     </p>
-                    <div id="jobs-grid" class="row g-2">
-                        {% for job in jobs %}
-                        <div class="col-md-6">
-                            <div class="card date-card h-100"
-                                 data-job-id="{{ job.job_id }}"
-                                 data-job-name="{{ job.job_name }}">
-                                <div class="card-body text-center">
-                                    <h6 class="mb-0">{{ job.job_name }}</h6>
-                                </div>
-                            </div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-8">
+                            <select id="job-select" class="form-select form-select-lg">
+                                <option value="">-- Select a position --</option>
+                                {% for job in jobs %}
+                                <option value="{{ job.job_id }}">{{ job.job_name }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
-                        {% endfor %}
+                        <div class="col-md-4">
+                            <button type="button" id="job-continue-btn"
+                                    class="btn btn-primary btn-lg w-100" disabled>
+                                Continue
+                            </button>
+                        </div>
                     </div>
                 </div>
 
