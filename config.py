@@ -44,6 +44,23 @@ DEFAULT_SLOT_DURATION_MINUTES = 30
 # with start_time/end_time appended for the booked window.
 INTERVIEW_LINK_BASE = 'https://app.fabrichq.ai/interview'
 
+# Timezone the interview schedule is expressed in. Slot dates and times
+# are stored as naive local strings, so "is this slot in the past?" is
+# answered against this zone rather than the server's clock -- a server
+# running in UTC would otherwise keep past IST slots bookable.
+TIMEZONE = 'Asia/Kolkata'
+
+# How long before a slot starts to stop accepting bookings, in minutes.
+# 0 means a slot is bookable right up to its start time.
+BOOKING_CUTOFF_MINUTES = 0
+
+
+def now_local():
+    """Current time in the interview timezone."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo(TIMEZONE)).replace(tzinfo=None)
+
 
 def build_interview_link(job_id, candidate_id):
     """Build the interview link for a candidate's chosen job."""

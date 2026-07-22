@@ -306,7 +306,8 @@ def get_job_dates_api():
     if not is_valid_job_id(job_id):
         return jsonify({'error': 'Invalid job_id'}), 400
 
-    return jsonify(get_interview_dates())
+    # Candidate-facing: hide days with no slots left today or later.
+    return jsonify(get_interview_dates(only_bookable=True))
 
 
 @app.route('/api/slots')
@@ -328,6 +329,7 @@ def get_slots_api():
     if not is_valid_job_id(job_id):
         return jsonify({'error': 'Invalid job_id'}), 400
 
+    # Candidate-facing: past slots are filtered out by default.
     return jsonify(get_slots_by_date(date))
 
 

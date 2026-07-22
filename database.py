@@ -3,11 +3,12 @@ Database initialization and operations for Multi-Job Interview Slot Booking Appl
 """
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 from config import (
     DATABASE_PATH, DEFAULT_SLOT_CAPACITY, DEFAULT_SLOT_START_TIME,
-    DEFAULT_SLOT_END_TIME, DEFAULT_SLOT_DURATION_MINUTES
+    DEFAULT_SLOT_END_TIME, DEFAULT_SLOT_DURATION_MINUTES,
+    BOOKING_CUTOFF_MINUTES, now_local
 )
 
 
@@ -360,9 +361,13 @@ def set_job_booking_enabled(job_id, enabled):
 
 # ==================== JOB DATES FUNCTIONS ====================
 
-def get_interview_dates():
+def get_interview_dates(only_bookable=False):
     """Get all interview dates (shared by every job), with optional
-    per-date time overrides."""
+    per-date time overrides.
+
+    only_bookable drops dates that have no slots left in the future, so a
+    candidate is never offered a day they cannot actually book.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -373,6 +378,18 @@ def get_interview_dates():
     ''')
 
     dates = [dict(row) for row in cursor.fetchall()]
+
+    if only_bookable:
+        now = now_local()
+        bookable = []
+        for d in dates:
+            cursor.execute(
+                'SELECT start_time FROM slots WHERE date = ?', (d['date'],))
+            times = [r['start_time'] for r in cursor.fetchall()]
+            if any(not is_slot_in_past(d['date'], t, now) for t in times):
+                bookable.append(d)
+        dates = bookable
+
     conn.close()
 
     return dates
@@ -648,10 +665,29 @@ def initialize_slots():
     }
 
 
-def get_slots_by_date(date):
+def is_slot_in_past(date, start_time, now=None):
+    """Has this slot's start time already passed (or is too close)?
+
+    date is dd-mm-yyyy and start_time is HH:MM, both in the interview
+    timezone.
+    """
+    now = now or now_local()
+    try:
+        slot_dt = datetime.strptime(f'{date} {start_time}', '%d-%m-%Y %H:%M')
+    except ValueError:
+        return False  # malformed rows are left visible rather than hidden
+
+    # Strictly less-than: a slot starting exactly now is still bookable,
+    # so someone arriving at 12:00 can take the 12:00 slot.
+    return slot_dt < now + timedelta(minutes=BOOKING_CUTOFF_MINUTES)
+
+
+def get_slots_by_date(date, include_past=False):
     """Get the shared slots for a date, with availability.
 
-    booked_count covers bookings from every job.
+    booked_count covers bookings from every job. Slots whose start time
+    has already passed are excluded by default, so a candidate arriving
+    mid-day only sees times they can still attend.
     """
     max_capacity = get_slot_capacity()
 
@@ -669,6 +705,11 @@ def get_slots_by_date(date):
 
     slots = [dict(row) for row in cursor.fetchall()]
     conn.close()
+
+    if not include_past:
+        now = now_local()
+        slots = [s for s in slots
+                 if not is_slot_in_past(s['date'], s['start_time'], now)]
 
     return slots
 
@@ -797,6 +838,13 @@ def book_slot(candidate_id, job_id, slot_id):
 
             if not slot:
                 return {'error': 'Invalid slot selected.'}
+
+            # Re-check here, not just when listing slots: a page left open
+            # since the morning would otherwise still post a slot whose
+            # time has since passed.
+            if is_slot_in_past(slot['date'], slot['start_time']):
+                return {'error': 'That time slot has already passed. '
+                                 'Please choose a later one.'}
 
             # Capacity is global: booked_count already counts bookings
             # made from every job, so this check enforces the shared
