@@ -258,7 +258,7 @@ def get_all_jobs():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT job_id, job_name FROM job_configs ORDER BY created_at')
+    cursor.execute('SELECT job_id, job_name FROM job_configs ORDER BY job_name COLLATE NOCASE')
     jobs = {row['job_id']: row['job_name'] for row in cursor.fetchall()}
     conn.close()
 
@@ -314,7 +314,7 @@ def get_all_job_configs():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM job_configs ORDER BY created_at')
+    cursor.execute('SELECT * FROM job_configs ORDER BY job_name COLLATE NOCASE')
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
@@ -995,7 +995,7 @@ def get_dashboard_stats():
             jc.booking_enabled,
             (SELECT COUNT(*) FROM bookings WHERE job_id = jc.job_id) as total_bookings
         FROM job_configs jc
-        ORDER BY jc.created_at
+        ORDER BY jc.job_name COLLATE NOCASE
     ''')
 
     job_stats = [dict(row) for row in cursor.fetchall()]
