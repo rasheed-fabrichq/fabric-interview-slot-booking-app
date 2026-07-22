@@ -36,22 +36,17 @@
                         Choose the position you want to interview for. You may book
                         only one interview in total.
                     </p>
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-8">
-                            <select id="job-select" class="form-select form-select-lg">
-                                <option value="">-- Select a position --</option>
-                                {% for job in jobs %}
-                                <option value="{{ job.job_id }}">{{ job.job_name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <button type="button" id="job-continue-btn"
-                                    class="btn btn-primary btn-lg w-100" disabled>
-                                Continue
-                            </button>
-                        </div>
-                    </div>
+                    <select id="job-select" class="form-select form-select-lg mb-3">
+                        <option value="">-- Select a position --</option>
+                        {% for job in jobs %}
+                        <option value="{{ job.job_id }}">{{ job.job_name }}</option>
+                        {% endfor %}
+                    </select>
+
+                    <button type="button" id="job-continue-btn"
+                            class="btn btn-primary btn-lg w-100" disabled>
+                        Continue
+                    </button>
                 </div>
 
                 <!-- Selected Job Display -->
