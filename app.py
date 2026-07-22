@@ -502,12 +502,27 @@ def admin_upload():
                                          error='Invalid file format. Use CSV or Excel.',
                                          jobs=get_jobs())
 
-                # Validate columns (removed college_name, kept interview_link optional)
-                required_columns = ['name', 'email', 'interview_link']
-                if not all(col in df.columns for col in required_columns):
-                    return render_template('admin_upload.html',
-                                         error=f'Missing required columns: {required_columns}',
-                                         jobs=get_jobs())
+                # Expected headers: Name, Email, AI Interview Link.
+                # Matched case-insensitively with surrounding whitespace
+                # trimmed, so 'name' / ' Name ' / 'NAME' all work.
+                header_map = {
+                    str(col).strip().lower(): col for col in df.columns
+                }
+                required_columns = ['Name', 'Email', 'AI Interview Link']
+                missing_columns = [c for c in required_columns
+                                   if c.lower() not in header_map]
+                if missing_columns:
+                    return render_template(
+                        'admin_upload.html',
+                        error=(f"Missing required column(s): "
+                               f"{', '.join(missing_columns)}. "
+                               f"Expected: {', '.join(required_columns)}. "
+                               f"Found: {', '.join(str(c) for c in df.columns)}"),
+                        jobs=get_jobs())
+
+                name_col = header_map['name']
+                email_col = header_map['email']
+                link_col = header_map['ai interview link']
 
                 # Add candidates with validation
                 success_count = 0
@@ -518,23 +533,24 @@ def admin_upload():
                     row_num = index + 2  # Excel row number (header is row 1)
 
                     # Get values
-                    name = row.get('name')
-                    email = row.get('email')
-                    interview_link = row.get('interview_link')
+                    name = row.get(name_col)
+                    email = row.get(email_col)
+                    interview_link = row.get(link_col)
 
                     # Prepare row display for error messages
-                    row_display = f"name='{name}', email='{email}', interview_link='{interview_link}'"
+                    row_display = (f"Name='{name}', Email='{email}', "
+                                   f"AI Interview Link='{interview_link}'")
 
                     # Validation 1: Check for missing fields
                     if pd.isna(name) or pd.isna(email) or pd.isna(interview_link):
                         error_count += 1
                         missing_fields = []
                         if pd.isna(name):
-                            missing_fields.append('name')
+                            missing_fields.append('Name')
                         if pd.isna(email):
-                            missing_fields.append('email')
+                            missing_fields.append('Email')
                         if pd.isna(interview_link):
-                            missing_fields.append('interview_link')
+                            missing_fields.append('AI Interview Link')
                         errors.append(f"Row {row_num}: Missing required fields: {', '.join(missing_fields)} | Row data: {row_display}")
                         continue
 
