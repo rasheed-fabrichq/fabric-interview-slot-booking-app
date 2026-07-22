@@ -46,7 +46,7 @@
 
                     <div class="alert alert-info small">
                         <strong>Upload once for the whole drive.</strong> Candidates are
-                        not tied to a job &mdash; each candidate picks which position
+                        not tied to a case study &mdash; each candidate picks which one
                         they want when they open their booking link, and may book
                         only one interview in total.
                     </div>
@@ -67,7 +67,7 @@
                                 <code>candidate_id</code> parameter of the AI Interview
                                 Link and must be a valid UUID</li>
                             <li>Any job in the link is ignored &mdash; candidates choose
-                                their position when booking</li>
+                                their case study when booking</li>
                         </ul>
                     </div>
 
@@ -86,8 +86,8 @@
             </div>
             <div class="card-body">
                 <pre class="bg-light p-2 rounded small" style="white-space: pre-wrap; word-break: break-all;">Name,Email,AI Interview Link
-John Doe,john@example.com,https://app.fabrichq.ai/interview/&lt;JOB_UUID&gt;/?candidate_id=7f3e9a2c-4b1d-4f8e-9a2c-4b1d4f8e9a2c
-Jane Smith,jane@example.com,https://app.fabrichq.ai/interview/&lt;JOB_UUID&gt;/?candidate_id=8a4f0b3d-5c2e-4a9f-8b3d-5c2e4a9f8b3d</pre>
+John Doe,john@example.com,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=7f3e9a2c-4b1d-4f8e-9a2c-4b1d4f8e9a2c
+Jane Smith,jane@example.com,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=8a4f0b3d-5c2e-4a9f-8b3d-5c2e4a9f8b3d</pre>
             </div>
         </div>
 
@@ -99,7 +99,7 @@ Jane Smith,jane@example.com,https://app.fabrichq.ai/interview/&lt;JOB_UUID&gt;/?
                 <p class="small mb-2"><strong>After uploading, send each candidate their slot booking link:</strong></p>
                 <pre class="bg-light p-2 rounded small">{{ request.host_url|trim('/') }}/book?candidate_id=<span class="text-primary">CANDIDATE_UUID</span></pre>
 
-                <p class="small mb-2 mt-3">The link carries no job &mdash; candidates choose their position on the booking page.</p>
+                <p class="small mb-2 mt-3">The link carries no case study &mdash; candidates choose it on the booking page.</p>
 
                 <div class="alert alert-warning small mt-3 mb-0">
                     <strong>Tip:</strong> Use

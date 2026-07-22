@@ -42,7 +42,7 @@ DEFAULT_SLOT_DURATION_MINUTES = 30
 # job. Interview links are no longer uploaded -- they are constructed as:
 #   <INTERVIEW_LINK_BASE>/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
 # with start_time/end_time appended for the booked window.
-INTERVIEW_LINK_BASE = 'https://app.fabrichq.ai/interview'
+INTERVIEW_LINK_BASE = 'https://app.fabrichq.ai/jobs'
 
 # Timezone the interview schedule is expressed in. Slot dates and times
 # are stored as naive local strings, so "is this slot in the past?" is
