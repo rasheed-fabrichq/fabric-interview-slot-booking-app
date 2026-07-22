@@ -273,7 +273,7 @@ def booking_form():
 
     if not open_jobs:
         return render_template('booking_closed.html',
-                             message='No positions are currently open for booking.')
+                             message='No case studies are currently open for booking.')
 
     # Update status to 'clicked' if it was 'pending'
     if candidate['status'] == 'pending':

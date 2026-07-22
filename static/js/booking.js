@@ -329,7 +329,7 @@ function selectSlot(slotId, slotTime, cardEl) {
 // Event listener for confirm booking button
 confirmBookingBtn.addEventListener('click', function() {
     if (!jobId) {
-        showError('Please select a position.');
+        showError('Please select a case study.');
         return;
     }
 

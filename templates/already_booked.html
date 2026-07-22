@@ -24,7 +24,7 @@
                 <div class="card bg-light">
                     <div class="card-body">
                         <h5 class="card-title">Your Booked Slot:</h5>
-                        <p><strong>Position:</strong> {{ booking.job_name }}</p>
+                        <p><strong>Case Study:</strong> {{ booking.job_name }}</p>
                         <p><strong>AI Discussion Day:</strong> {{ booking.day_of_week }}</p>
                         <p><strong>Date:</strong> {{ booking.date }}</p>
                         <p><strong>Time:</strong> {{ booking.start_time_formatted }} - {{ booking.end_time_formatted }}</p>
@@ -33,10 +33,12 @@
                 {% endif %}
 
                 <div class="alert alert-info mt-4">
-                    <strong>Note:</strong> You have already booked a slot for this position. You cannot make changes to your booking.
+                    <strong>Note:</strong> You have already booked your interview slot. You cannot make changes to your booking.
                     {% if booking %}
                     <br><br>
-                    <strong>Tip:</strong> If you were invited for other positions, you will receive separate booking links for each.
+                    Your interview link has been sent to <strong>{{ candidate.email }}</strong>.
+                    If you cannot find it, please check your spam folder or contact
+                    <strong>support@fabrichq.ai</strong>.
                     {% endif %}
                 </div>
             </div>
