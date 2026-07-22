@@ -81,13 +81,13 @@
 
                 <!-- Slot Selection -->
                 <div id="slot-container" class="d-none">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
                         <h5 class="mb-0">Step 3: Select Time Slot</h5>
-                        <button type="button" id="back-to-dates-btn" class="btn btn-outline-primary btn-sm">
-                            <i class="bi bi-arrow-left"></i> Back to Dates
+                        <button type="button" id="back-to-dates-btn" class="btn btn-outline-primary btn-sm flex-shrink-0">
+                            <i class="bi bi-arrow-left"></i> Back
                         </button>
                     </div>
-                    <p class="text-muted small">Click on a time slot to select it. Green = Available, Yellow = Almost Full, Gray = Full</p>
+                    <p class="text-muted small">Tap a time slot to select it. Green = Available, Yellow = Almost Full, Gray = Full</p>
 
                     <div id="slots-grid" class="row g-2">
                         <!-- Slots will be loaded here via JavaScript -->
@@ -97,12 +97,16 @@
                         <div class="alert alert-primary">
                             <strong>Selected Slot:</strong> <span id="selected-slot-time"></span>
                         </div>
-                        <button type="button" id="confirm-booking-btn" class="btn btn-success btn-lg">
-                            Confirm Booking
-                        </button>
-                        <button type="button" id="change-date-btn" class="btn btn-outline-secondary btn-lg ms-2">
-                            Change Date
-                        </button>
+                        <!-- Stacked full-width on phones, side by side from sm up,
+                             so Confirm is never a small target. -->
+                        <div class="d-grid d-sm-flex gap-2">
+                            <button type="button" id="confirm-booking-btn" class="btn btn-success btn-lg">
+                                Confirm Booking
+                            </button>
+                            <button type="button" id="change-date-btn" class="btn btn-outline-secondary btn-lg">
+                                Change Date
+                            </button>
+                        </div>
                     </div>
                 </div>
 

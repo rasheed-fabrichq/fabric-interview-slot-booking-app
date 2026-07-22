@@ -115,6 +115,7 @@
             </div>
             <div class="card-body p-0">
                 {% if dates %}
+                <div class="table-responsive">
                 <table class="table table-sm mb-0">
                     <thead>
                         <tr>
@@ -141,6 +142,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
                 {% else %}
                 <div class="p-3 text-muted small">
                     No dates yet.

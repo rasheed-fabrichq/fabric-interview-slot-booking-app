@@ -144,7 +144,8 @@ function displayDates(dates) {
 // Function to create a date card
 function createDateCard(dateInfo) {
     const col = document.createElement('div');
-    col.className = 'col-md-6';
+    // Two per row on phones as well -- dates are short enough to pair up.
+    col.className = 'col-6 col-md-6';
 
     const card = document.createElement('div');
     card.className = 'card date-card';
