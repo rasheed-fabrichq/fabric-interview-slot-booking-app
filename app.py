@@ -23,7 +23,7 @@ from database import (
     init_database, add_candidate, get_candidate, update_candidate_status,
     get_slots_by_date, book_slot, get_all_bookings,
     initialize_slots, get_dashboard_stats,
-    get_booking_by_candidate, clear_all_slots,
+    get_booking_by_candidate, clear_all_slots, release_booking,
     is_booking_enabled, set_booking_enabled, get_all_candidates,
     get_job_config, get_all_job_configs,
     get_interview_dates, add_interview_date, delete_interview_date,
@@ -981,6 +981,36 @@ def admin_export_pending():
         mimetype='text/csv',
         headers={'Content-Disposition': f'attachment; filename={filename}'}
     )
+
+
+@app.route('/admin/release-booking/<candidate_id>', methods=['POST'])
+@admin_required
+@csrf.exempt
+def admin_release_booking(candidate_id):
+    """Cancel a candidate's booking so they can book again.
+
+    Frees the slot for everyone and lets the candidate re-use their
+    original booking link to pick a different case study or time.
+    """
+    candidate = get_candidate(candidate_id)
+    if not candidate:
+        return jsonify({'error': 'Candidate not found'}), 404
+
+    result = release_booking(candidate_id)
+
+    if 'error' in result:
+        return jsonify(result), 400
+
+    print(f"[ADMIN] Released booking for candidate={candidate_id} "
+          f"({result['freed_date']} {result['freed_time']})")
+
+    booking_link = f"{request.host_url.rstrip('/')}/book?candidate_id={candidate_id}"
+    return jsonify({
+        'success': True,
+        'message': (f"Booking released. {result['freed_date']} "
+                    f"{result['freed_time']} is free again."),
+        'booking_link': booking_link,
+    })
 
 
 @app.route('/admin/resend-email/<candidate_id>', methods=['POST'])

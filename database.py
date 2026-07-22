@@ -996,6 +996,55 @@ def update_booking_email_status(candidate_id, status, error=None):
     conn.close()
 
 
+def release_booking(candidate_id):
+    """Cancel a candidate's booking so they can book again.
+
+    Frees the seat back into the shared pool and resets the candidate to
+    'clicked', so their original booking link works again and they may
+    choose any case study and slot. Does not notify the candidate.
+    """
+    try:
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT b.slot_id, s.date, s.start_time
+                FROM bookings b
+                JOIN slots s ON b.slot_id = s.id
+                WHERE b.candidate_id = ?
+            ''', (candidate_id,))
+            booking = cursor.fetchone()
+
+            if not booking:
+                return {'error': 'No booking found for this candidate.'}
+
+            # Give the seat back. Guard against going negative in case the
+            # count was ever adjusted by hand (see block_slots.py).
+            cursor.execute('''
+                UPDATE slots
+                SET booked_count = MAX(0, booked_count - 1)
+                WHERE id = ?
+            ''', (booking['slot_id'],))
+
+            cursor.execute(
+                'DELETE FROM bookings WHERE candidate_id = ?', (candidate_id,))
+
+            cursor.execute('''
+                UPDATE candidates
+                SET status = 'clicked', updated_at = ?
+                WHERE candidate_id = ?
+            ''', (datetime.now(), candidate_id))
+
+            return {
+                'success': True,
+                'freed_date': booking['date'],
+                'freed_time': booking['start_time'],
+            }
+
+    except Exception as e:
+        return {'error': f'An error occurred: {str(e)}'}
+
+
 def get_booking_with_details(candidate_id):
     """Get full booking details needed for sending confirmation email."""
     conn = get_db_connection()

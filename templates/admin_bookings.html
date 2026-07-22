@@ -84,12 +84,22 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary resend-btn"
-                                        data-candidate-id="{{ booking.candidate_id }}"
-                                        data-job-id="{{ booking.job_id }}"
-                                        title="Resend confirmation email">
-                                        <i class="bi bi-envelope-arrow-up"></i> Resend
-                                    </button>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-sm btn-outline-primary resend-btn"
+                                            data-candidate-id="{{ booking.candidate_id }}"
+                                            data-job-id="{{ booking.job_id }}"
+                                            title="Resend confirmation email">
+                                            <i class="bi bi-envelope-arrow-up"></i> Resend
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger release-btn"
+                                            data-candidate-id="{{ booking.candidate_id }}"
+                                            data-name="{{ booking.name }}"
+                                            data-slot="{{ booking.date }} {{ booking.start_time }}"
+                                            data-job-name="{{ booking.job_name }}"
+                                            title="Cancel this booking so the candidate can book again">
+                                            <i class="bi bi-arrow-counterclockwise"></i> Allow Rebooking
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -150,6 +160,62 @@ document.querySelectorAll('.resend-btn').forEach(function(btn) {
         .catch(function(err) {
             button.disabled = false;
             button.innerHTML = '<i class="bi bi-envelope-arrow-up"></i> Resend';
+        });
+    });
+});
+
+// Allow rebooking: cancels the booking, frees the slot, and lets the
+// candidate use their original link again.
+document.querySelectorAll('.release-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var candidateId = this.dataset.candidateId;
+        var name = this.dataset.name;
+        var slot = this.dataset.slot;
+        var jobName = this.dataset.jobName;
+        var button = this;
+
+        var ok = confirm(
+            'Allow ' + name + ' to book again?\n\n' +
+            'This cancels their current booking:\n' +
+            '  ' + jobName + '\n' +
+            '  ' + slot + '\n\n' +
+            'The slot is freed for other candidates and they can pick a new ' +
+            'case study and time using their original booking link.\n\n' +
+            'They are NOT notified automatically — you will need to tell them.'
+        );
+        if (!ok) return;
+
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Releasing...';
+
+        fetch('/admin/release-booking/' + candidateId, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            var toast = document.getElementById('emailToast');
+            var msg = document.getElementById('toastMessage');
+            if (data.success) {
+                toast.classList.remove('bg-danger');
+                toast.classList.add('bg-success', 'text-white');
+                msg.textContent = data.message + ' Booking link: ' + data.booking_link;
+                new bootstrap.Toast(toast, {delay: 15000}).show();
+                // Row no longer represents a booking; drop it.
+                var row = button.closest('tr');
+                if (row) row.remove();
+            } else {
+                toast.classList.remove('bg-success');
+                toast.classList.add('bg-danger', 'text-white');
+                msg.textContent = 'Error: ' + (data.error || 'Unknown error');
+                new bootstrap.Toast(toast).show();
+                button.disabled = false;
+                button.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Allow Rebooking';
+            }
+        })
+        .catch(function(err) {
+            button.disabled = false;
+            button.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Allow Rebooking';
         });
     });
 });
