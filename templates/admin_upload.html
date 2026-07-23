@@ -65,10 +65,10 @@
                         <ul class="mb-0">
                             <li>Format: CSV or Excel (.xlsx, .xls)</li>
                             <li>Required columns: <code>Name</code>, <code>Email</code>,
-                                <code>AI Interview Link</code>
+                                <code>Job Application Link</code>
                                 <small class="text-muted">(column names are not case-sensitive)</small></li>
                             <li>The candidate ID and job ID are read from the
-                                <code>AI Interview Link</code>; both must be valid UUIDs</li>
+                                <code>Job Application Link</code>; both must be valid UUIDs</li>
                             <li>The job in each link must match the job selected above</li>
                         </ul>
                     </div>
@@ -87,7 +87,7 @@
                 <h5 class="mb-0">Sample CSV Format</h5>
             </div>
             <div class="card-body">
-                <pre class="bg-light p-2 rounded small" style="white-space: pre-wrap; word-break: break-all;">Name,Email,AI Interview Link
+                <pre class="bg-light p-2 rounded small" style="white-space: pre-wrap; word-break: break-all;">Name,Email,Job Application Link
 John Doe,john@example.com,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=7f3e9a2c-4b1d-4f8e-9a2c-4b1d4f8e9a2c
 Jane Smith,jane@example.com,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=8a4f0b3d-5c2e-4a9f-8b3d-5c2e4a9f8b3d</pre>
             </div>

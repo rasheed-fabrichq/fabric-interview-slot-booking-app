@@ -523,15 +523,15 @@ def admin_upload():
                                          error='Invalid file format. Use CSV or Excel.',
                                          jobs=get_jobs())
 
-                # Expected headers: Name, Email, AI Interview Link.
+                # Expected headers: Name, Email, Job Application Link.
                 # Matched case-insensitively with surrounding whitespace
-                # trimmed, so 'Name' / 'name' / ' NAME ' all work. The older
-                # 'interview_link' spelling is still accepted.
+                # trimmed, so 'Name' / 'name' / ' NAME ' all work. Earlier
+                # spellings of the link column are still accepted.
                 header_map = {
                     str(col).strip().lower(): col for col in df.columns
                 }
-                LINK_ALIASES = ('ai interview link', 'interview_link',
-                                'interview link')
+                LINK_ALIASES = ('job application link', 'ai interview link',
+                                'interview_link', 'interview link')
 
                 name_col = header_map.get('name')
                 email_col = header_map.get('email')
@@ -544,14 +544,14 @@ def admin_upload():
                 if not email_col:
                     missing_columns.append('Email')
                 if not link_col:
-                    missing_columns.append('AI Interview Link')
+                    missing_columns.append('Job Application Link')
 
                 if missing_columns:
                     return render_template(
                         'admin_upload.html',
                         error=(f"Missing required column(s): "
                                f"{', '.join(missing_columns)}. "
-                               f"Expected: Name, Email, AI Interview Link. "
+                               f"Expected: Name, Email, Job Application Link. "
                                f"Found: {', '.join(str(c) for c in df.columns)}"),
                         jobs=get_jobs())
 
@@ -570,7 +570,7 @@ def admin_upload():
 
                     # Prepare row display for error messages
                     row_display = (f"Name='{name}', Email='{email}', "
-                                   f"AI Interview Link='{interview_link}'")
+                                   f"Job Application Link='{interview_link}'")
 
                     # Validation 1: Check for missing fields
                     if pd.isna(name) or pd.isna(email) or pd.isna(interview_link):
@@ -581,7 +581,7 @@ def admin_upload():
                         if pd.isna(email):
                             missing_fields.append('Email')
                         if pd.isna(interview_link):
-                            missing_fields.append('AI Interview Link')
+                            missing_fields.append('Job Application Link')
                         errors.append(f"Row {row_num}: Missing required fields: {', '.join(missing_fields)} | Row data: {row_display}")
                         continue
 
