@@ -119,6 +119,7 @@ def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, sl
             start_time=start_time_fmt,
             end_time=end_time_fmt,
             interview_link_with_expiry=interview_link_with_expiry,
+            duration_minutes=slot_duration,
         )
 
         if success:
