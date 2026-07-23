@@ -38,6 +38,12 @@ from config import (
 )
 from email_utils import send_booking_confirmation
 
+# Delay between a booking and its confirmation email, in seconds.
+# Override with EMAIL_CONFIRMATION_DELAY_SECONDS in .env; 0 sends
+# immediately. Note the send runs on a daemon thread, so a longer delay
+# means a restart within that window drops the email.
+DEFAULT_EMAIL_DELAY_SECONDS = 300
+
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-in-production'  # Change this!
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -55,11 +61,32 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 init_database()
 
 
-def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, slot_duration, delay_seconds=300):
+def get_email_delay_seconds():
+    """How long to wait after a booking before sending the confirmation.
+
+    Read at call time rather than import time so it can be changed in .env
+    and picked up on the next booking without editing code. Falls back to
+    the default if unset or not a number.
+    """
+    raw = os.environ.get('EMAIL_CONFIRMATION_DELAY_SECONDS', '')
+    try:
+        value = int(str(raw).strip())
+        return value if value >= 0 else DEFAULT_EMAIL_DELAY_SECONDS
+    except (TypeError, ValueError):
+        if str(raw).strip():
+            print(f"[EMAIL] Ignoring invalid EMAIL_CONFIRMATION_DELAY_SECONDS="
+                  f"{raw!r}; using {DEFAULT_EMAIL_DELAY_SECONDS}s")
+        return DEFAULT_EMAIL_DELAY_SECONDS
+
+
+def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, slot_duration, delay_seconds=None):
     """Send booking confirmation email in a background thread, with optional delay."""
     import time
+    if delay_seconds is None:
+        delay_seconds = get_email_delay_seconds()
     print(f"[EMAIL] Thread started for candidate={candidate_id} job={job_id}. Waiting {delay_seconds}s before sending...")
-    time.sleep(delay_seconds)
+    if delay_seconds:
+        time.sleep(delay_seconds)
     print(f"[EMAIL] Delay done. Fetching booking details for candidate={candidate_id} job={job_id}")
 
     try:
