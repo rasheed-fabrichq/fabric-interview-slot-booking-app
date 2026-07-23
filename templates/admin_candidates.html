@@ -53,6 +53,7 @@
                                 <th>Status</th>
                                 <th>Candidate ID</th>
                                 <th>AI Discussion Link</th>
+                                <th>Slot Booking Link</th>
                                 <th>Created At</th>
                             </tr>
                         </thead>
@@ -85,6 +86,25 @@
                                     {% else %}
                                     <span class="text-muted">N/A</span>
                                     {% endif %}
+                                </td>
+                                <td>
+                                    {# The link the candidate uses to pick a slot. #}
+                                    {% set booking_link = request.host_url.rstrip('/')
+                                        ~ '/book?candidate_id=' ~ candidate.candidate_id
+                                        ~ '&job_id=' ~ candidate.job_id %}
+                                    <div class="d-flex gap-1">
+                                        <a href="{{ booking_link }}" target="_blank"
+                                           class="btn btn-sm btn-outline-success"
+                                           title="{{ booking_link }}">
+                                            <i class="bi bi-calendar-check"></i> Open
+                                        </a>
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary copy-link-btn"
+                                                data-link="{{ booking_link }}"
+                                                title="Copy booking link">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                    </div>
                                 </td>
                                 <td>{{ candidate.created_at }}</td>
                             </tr>
@@ -132,6 +152,41 @@ document.addEventListener('DOMContentLoaded', function() {
             // Update total count
             if (totalCount) {
                 totalCount.textContent = visibleCount;
+            }
+        });
+    });
+
+    // Copy a candidate's slot booking link to the clipboard
+    document.querySelectorAll('.copy-link-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const link = this.dataset.link;
+            const button = this;
+
+            const done = () => {
+                const original = button.innerHTML;
+                button.innerHTML = '<i class="bi bi-check-lg"></i>';
+                button.classList.add('btn-success');
+                button.classList.remove('btn-outline-secondary');
+                setTimeout(() => {
+                    button.innerHTML = original;
+                    button.classList.remove('btn-success');
+                    button.classList.add('btn-outline-secondary');
+                }, 1200);
+            };
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(link).then(done);
+            } else {
+                // Fallback for non-HTTPS origins, where the clipboard API
+                // is unavailable.
+                const ta = document.createElement('textarea');
+                ta.value = link;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); done(); } catch (e) {}
+                document.body.removeChild(ta);
             }
         });
     });
