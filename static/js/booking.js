@@ -52,7 +52,7 @@ function displayDates(dates) {
     datesGrid.innerHTML = '';
 
     if (dates.length === 0) {
-        datesGrid.innerHTML = '<div class="col-12"><div class="alert alert-warning">No interview dates available.</div></div>';
+        datesGrid.innerHTML = '<div class="col-12"><div class="alert alert-warning">No dates are available for booking. All scheduled dates may have passed &mdash; please contact support@fabrichq.ai.</div></div>';
         return;
     }
 
@@ -149,7 +149,7 @@ function displaySlots(slots) {
 
     if (slots.length === 0) {
         slotContainer.classList.remove('d-none');
-        slotsGrid.innerHTML = '<div class="col-12"><div class="alert alert-warning">No slots available for this date.</div></div>';
+        slotsGrid.innerHTML = '<div class="col-12"><div class="alert alert-warning">No time slots are still available on this date. Times that have already passed cannot be booked &mdash; please choose another date.</div></div>';
         return;
     }
 

@@ -345,7 +345,8 @@ def get_job_dates_api():
     if not is_valid_job_id(job_id):
         return jsonify({'error': 'Invalid job_id'}), 400
 
-    dates = get_job_dates(job_id)
+    # Candidate-facing: hide days with no slots left today or later.
+    dates = get_job_dates(job_id, only_bookable=True)
     return jsonify(dates)
 
 
@@ -364,6 +365,7 @@ def get_slots_api():
     if not is_valid_job_id(job_id):
         return jsonify({'error': 'Invalid job_id'}), 400
 
+    # Candidate-facing: past slots are filtered out by default.
     slots = get_slots_by_job_and_date(job_id, date)
     return jsonify(slots)
 

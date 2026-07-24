@@ -3,9 +3,9 @@ Database initialization and operations for Multi-Job Interview Slot Booking Appl
 """
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import contextmanager
-from config import DATABASE_PATH
+from config import DATABASE_PATH, BOOKING_CUTOFF_MINUTES, now_local
 
 
 def get_db_connection():
@@ -368,18 +368,37 @@ def set_job_booking_enabled(job_id, enabled):
 
 # ==================== JOB DATES FUNCTIONS ====================
 
-def get_job_dates(job_id):
-    """Get all dates for a specific job with optional time overrides"""
+def get_job_dates(job_id, only_bookable=False):
+    """Get all dates for a specific job with optional time overrides.
+
+    only_bookable drops dates that have no slots left in the future, so a
+    candidate is never offered a day they cannot actually book.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # dates are dd-mm-yyyy strings, so sort by year/month/day rather than
+    # lexically -- otherwise 01-08-2026 would sort before 30-07-2026.
     cursor.execute('''
         SELECT date, day_of_week, slot_start_time, slot_end_time FROM job_dates
         WHERE job_id = ?
-        ORDER BY date
+        ORDER BY substr(date, 7, 4), substr(date, 4, 2), substr(date, 1, 2)
     ''', (job_id,))
 
     dates = [dict(row) for row in cursor.fetchall()]
+
+    if only_bookable:
+        now = now_local()
+        bookable = []
+        for d in dates:
+            cursor.execute(
+                'SELECT start_time FROM slots WHERE job_id = ? AND date = ?',
+                (job_id, d['date']))
+            times = [r['start_time'] for r in cursor.fetchall()]
+            if any(not is_slot_in_past(d['date'], t, now) for t in times):
+                bookable.append(d)
+        dates = bookable
+
     conn.close()
 
     return dates
@@ -627,8 +646,29 @@ def initialize_slots_for_job(job_id):
     return {'success': True, 'slots_created': slots_inserted}
 
 
-def get_slots_by_job_and_date(job_id, date):
-    """Get all slots for a specific job and date with availability"""
+def is_slot_in_past(date, start_time, now=None):
+    """Has this slot's start time already passed (or is too close)?
+
+    date is dd-mm-yyyy and start_time is HH:MM, both in the interview
+    timezone.
+    """
+    now = now or now_local()
+    try:
+        slot_dt = datetime.strptime(f'{date} {start_time}', '%d-%m-%Y %H:%M')
+    except ValueError:
+        return False  # malformed rows are left visible rather than hidden
+
+    # Strictly less-than: a slot starting exactly now is still bookable,
+    # so someone arriving at 12:00 can take the 12:00 slot.
+    return slot_dt < now + timedelta(minutes=BOOKING_CUTOFF_MINUTES)
+
+
+def get_slots_by_job_and_date(job_id, date, include_past=False):
+    """Get all slots for a specific job and date with availability.
+
+    Slots whose start time has already passed are excluded by default, so
+    a candidate arriving mid-day only sees times they can still attend.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -655,6 +695,11 @@ def get_slots_by_job_and_date(job_id, date):
 
     slots = [dict(row) for row in cursor.fetchall()]
     conn.close()
+
+    if not include_past:
+        now = now_local()
+        slots = [s for s in slots
+                 if not is_slot_in_past(s['date'], s['start_time'], now)]
 
     return slots
 
@@ -765,6 +810,13 @@ def book_slot(candidate_id, job_id, slot_id):
 
             if not slot:
                 return {'error': 'Invalid slot selected.'}
+
+            # Re-check here, not just when listing slots: a page left open
+            # since the morning would otherwise still post a slot whose
+            # time has since passed.
+            if is_slot_in_past(slot['date'], slot['start_time']):
+                return {'error': 'That time slot has already passed. '
+                                 'Please choose a later one.'}
 
             # Verify slot belongs to the correct job
             if slot['job_id'] != job_id:
