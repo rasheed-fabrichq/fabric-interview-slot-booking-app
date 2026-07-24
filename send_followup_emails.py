@@ -39,10 +39,10 @@ from email_utils import send_raw_email
 # ---------------------------------------------------------------------
 
 # The CSV exported from Admin > Candidates > Export Non-Booked.
-CSV_PATH = os.path.expanduser('~/Downloads/candidates_pending_clicked.csv')
+CSV_PATH = os.path.expanduser('~/Downloads/candidates_pending_clicked (1).csv')
 
 # False = dry run, nothing is sent. Set to True to actually send.
-SEND = True
+SEND = False
 
 SUBJECT = 'Reminder: Book Your KOSMIC Round 1 AI Interaction Slot'
 
@@ -65,6 +65,11 @@ LIMIT = None
 # candidate's content. Empty list = no filter.
 #   e.g. ONLY_EMAILS = ['someone@example.com']
 ONLY_EMAILS = []
+
+# Copied on every email. Visible to the candidate in the Cc header, so
+# each of the 119 recipients sees these addresses -- and each of these
+# addresses receives one copy per candidate. Set to [] for no CC.
+CC_EMAILS = ['support@fabrichq.ai', 'abdul.rasheed@fabrichq.ai']
 
 # Seconds to wait between sends, to stay under the SES rate limit.
 DELAY_SECONDS = 0.5
@@ -226,6 +231,8 @@ def main():
     print(f"\nCSV:        {CSV_PATH}")
     print(f"Template:   {TEMPLATE_PATH}")
     print(f"Subject:    {SUBJECT}")
+    if CC_EMAILS:
+        print(f"CC:         {', '.join(CC_EMAILS)}  (on every email)")
     print(f"To send:    {len(candidates)} candidate(s)")
     if resumed:
         print(f"Skipped:    {len(resumed)} already in {SENT_LOG} from a previous run")
@@ -279,6 +286,7 @@ def main():
             html_content=html,
             reply_to=[os.environ.get('EMAIL_REPLY_TO', 'support@fabrichq.ai')],
             company_name=os.environ.get('EMAIL_COMPANY_NAME', 'Kearney'),
+            cc=CC_EMAILS,
         )
 
         if ok:
