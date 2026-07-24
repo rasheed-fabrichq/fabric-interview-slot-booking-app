@@ -30,6 +30,14 @@ def _load_template():
         return f.read()
 
 
+# Candidate-facing FAQ, linked from the confirmation email. Override with
+# FAQ_DOCUMENT_LINK in .env.
+FAQ_DOCUMENT_LINK = os.environ.get(
+    'FAQ_DOCUMENT_LINK',
+    'https://docs.google.com/document/d/'
+    '1xVZV7QoXUbp6csqoBzrn2Xd42e2n4F5edm3t6q-_hxs/edit?usp=sharing')
+
+
 CONFIRMATION_EMAIL_TEMPLATE = _load_template()
 
 
@@ -124,7 +132,7 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
     effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
     reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
     duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
-    subject = (f"CONFIRMED: Your AI Interaction – "
+    subject = (f"Your AI Interview Assessment is Confirmed – "
                f"{slot_date} {start_time} IST")
 
     html_content = CONFIRMATION_EMAIL_TEMPLATE
@@ -135,7 +143,11 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
         ('{{Start Time}}', start_time),
         ('{{End Time}}', end_time),
         ('{{Duration}}', duration_text),
+        # The template calls the join link the "Assessment Link"; the older
+        # name is kept so a reverted template still renders.
+        ('{{Assessment Link}}', interview_link_with_expiry),
         ('{{Unique Interview Link}}', interview_link_with_expiry),
+        ('{{FAQ Document Link}}', FAQ_DOCUMENT_LINK),
     ):
         html_content = html_content.replace(token, value)
 
