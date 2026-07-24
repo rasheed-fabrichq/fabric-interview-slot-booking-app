@@ -33,10 +33,12 @@
                 {% endif %}
 
                 <div class="alert alert-info mt-4">
-                    <strong>Note:</strong> You have already booked a slot for this position. You cannot make changes to your booking.
-                    {% if candidate.job_id != 'all_jobs' %}
+                    <strong>Note:</strong> You have already booked your assessment slot. You cannot make changes to your booking.
+                    {% if booking %}
                     <br><br>
-                    <strong>Tip:</strong> If you were invited for other positions, you will receive separate booking links for each.
+                    Your assessment link has been sent to <strong>{{ candidate.email }}</strong>.
+                    If you cannot find it, please check your spam folder or contact
+                    <strong>support@fabrichq.ai</strong>.
                     {% endif %}
                 </div>
             </div>
