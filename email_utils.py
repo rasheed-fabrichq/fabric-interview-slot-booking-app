@@ -33,9 +33,14 @@ def _load_template():
 CONFIRMATION_EMAIL_TEMPLATE = _load_template()
 
 
-def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=None):
+def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=None,
+                   cc=None):
     """
     Send an HTML email via AWS SES using raw MIME.
+
+    cc: an address or list of addresses to copy. They are visible to the
+    recipient in the Cc header and must also be listed in Destinations,
+    since SES delivers to that list rather than parsing the headers.
 
     Returns: (success: bool, error_message: str | None)
     """
@@ -64,9 +69,14 @@ def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=N
         sender = sender_email
         print(f"[SES] Sending as '{sender_name} <{sender}>'...")
 
+        cc_list = [cc] if isinstance(cc, str) else list(cc or [])
+        cc_list = [addr.strip() for addr in cc_list if addr and addr.strip()]
+
         msg = MIMEMultipart("mixed")
         msg["From"] = f"{sender_name} <{sender}>"
         msg["To"] = mail_to
+        if cc_list:
+            msg["Cc"] = ", ".join(cc_list)
         msg["Subject"] = subject
         if reply_to:
             if isinstance(reply_to, list):
@@ -81,7 +91,7 @@ def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=N
 
         response = client.send_raw_email(
             Source=f"{sender_name} <{sender}>",
-            Destinations=[mail_to],
+            Destinations=[mail_to] + cc_list,
             RawMessage={"Data": msg.as_string()},
         )
         print(f"[SES] Email sent successfully to {mail_to}. MessageId: {response['MessageId']}")
