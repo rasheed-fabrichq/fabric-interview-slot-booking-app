@@ -30,13 +30,16 @@ from database import (
     is_booking_enabled_for_job, set_job_booking_enabled,
     get_candidate_booking_for_job, get_all_slots_for_job,
     create_job, update_job_date_times,
-    update_booking_email_status, get_booking_with_details
+    update_booking_email_status, get_booking_with_details,
+    get_notifications_for_bookings, release_notification,
+    get_notification_log, get_notification_stats
 )
 from config import (
     get_jobs, is_valid_job_id, get_job_name,
     ADMIN_USERNAME, ADMIN_PASSWORD
 )
 from email_utils import send_booking_confirmation
+from phone_utils import normalize_phone
 
 # Delay between a booking and its confirmation email, in seconds.
 # Override with EMAIL_CONFIRMATION_DELAY_SECONDS in .env; 0 sends
@@ -562,11 +565,18 @@ def admin_upload():
                 }
                 LINK_ALIASES = ('job application link', 'ai interview link',
                                 'interview_link', 'interview link')
+                PHONE_ALIASES = ('phone', 'phone number', 'mobile',
+                                 'mobile number', 'contact number',
+                                 'contact', 'phone_number', 'mobile_number')
 
                 name_col = header_map.get('name')
                 email_col = header_map.get('email')
                 link_col = next((header_map[a] for a in LINK_ALIASES
                                  if a in header_map), None)
+                # Phone is optional: it is only needed for the reminder
+                # call, so a file without it still uploads fine.
+                phone_col = next((header_map[a] for a in PHONE_ALIASES
+                                  if a in header_map), None)
 
                 missing_columns = []
                 if not name_col:
@@ -589,6 +599,11 @@ def admin_upload():
                 success_count = 0
                 error_count = 0
                 errors = []
+                # Phone problems are warnings, not errors: the candidate
+                # is still created and can still book, they just will not
+                # get a reminder call.
+                phone_warnings = []
+                phone_ok_count = 0
 
                 for index, row in df.iterrows():
                     row_num = index + 2  # Excel row number (header is row 1)
@@ -649,13 +664,28 @@ def admin_upload():
                         errors.append(f"Row {row_num}: Invalid email format | Row data: {row_display}")
                         continue
 
+                    # Validation 7: Normalise the phone number, if the
+                    # file has one. Failures do not reject the row.
+                    normalized_phone = None
+                    if phone_col is not None:
+                        raw_phone = row.get(phone_col)
+                        normalized_phone, phone_error = normalize_phone(raw_phone)
+                        if normalized_phone:
+                            phone_ok_count += 1
+                        elif not (pd.isna(raw_phone) if raw_phone is not None
+                                  else True):
+                            phone_warnings.append(
+                                f"Row {row_num}: {phone_error} "
+                                f"(candidate created; no reminder call)")
+
                     # All validations passed, try to add candidate
                     result = add_candidate(
                         extracted_candidate_id,
                         job_id,
                         str(name).strip(),
                         str(email).strip(),
-                        str(interview_link).strip()
+                        str(interview_link).strip(),
+                        phone=normalized_phone
                     )
 
                     if 'success' in result:
@@ -667,10 +697,20 @@ def admin_upload():
                 # Clean up uploaded file
                 os.remove(filepath)
 
+                success_msg = (f'{success_count} candidates uploaded '
+                               f'successfully for {get_job_name(job_id)}.')
+                if phone_col is not None:
+                    success_msg += (f' {phone_ok_count} with a valid phone '
+                                    f'number for reminder calls.')
+                else:
+                    success_msg += (' No phone column found, so no reminder '
+                                    'calls can be placed for these candidates.')
+
                 return render_template('admin_upload.html',
-                                     success=f'{success_count} candidates uploaded successfully for {get_job_name(job_id)}.',
+                                     success=success_msg,
                                      error=f'{error_count} errors occurred.' if error_count > 0 else None,
                                      errors=errors[:50],  # Show first 50 errors
+                                     warnings=phone_warnings[:50],
                                      jobs=get_jobs())
 
             except Exception as e:
@@ -972,12 +1012,23 @@ def admin_bookings():
     job_id = request.args.get('job_id')  # Optional job filter
     bookings = get_all_bookings(job_id if job_id and is_valid_job_id(job_id) else None)
 
+    # Reminder rows for every booking in one query, rather than one
+    # lookup per row.
+    reminders = get_notifications_for_bookings(channel='email')
+
     for booking in bookings:
         slot_duration = booking.get('slot_duration_minutes')
         if slot_duration:
             start_time = datetime.strptime(booking['start_time'], "%H:%M")
             end_time = start_time + timedelta(minutes=slot_duration)
             booking['end_time'] = end_time.strftime("%H:%M")
+
+        reminder = reminders.get(
+            (booking['candidate_id'], booking['job_id'], 'email'))
+        booking['reminder_status'] = reminder['status'] if reminder else None
+        booking['reminder_error'] = reminder['error'] if reminder else None
+        booking['reminder_sent_at'] = (reminder['updated_at']
+                                       if reminder else None)
 
     return render_template('admin_bookings.html',
                          bookings=bookings,
@@ -1077,6 +1128,57 @@ def admin_release_booking(candidate_id, job_id):
         'message': (f"Booking released. {result['freed_date']} "
                     f"{result['freed_time']} is free again."),
         'booking_link': booking_link,
+    })
+
+
+@app.route('/admin/notifications')
+@admin_required
+def admin_notifications():
+    """Log of every reminder the worker has attempted."""
+    job_id = request.args.get('job_id')
+    status = request.args.get('status')
+
+    job_filter = job_id if job_id and is_valid_job_id(job_id) else None
+    status_filter = status if status in (
+        'sent', 'failed', 'skipped', 'pending') else None
+
+    notifications = get_notification_log(
+        job_id=job_filter, status=status_filter)
+    stats = get_notification_stats(job_id=job_filter)
+
+    return render_template('admin_notifications.html',
+                           notifications=notifications,
+                           stats=stats,
+                           jobs=get_jobs(),
+                           selected_job=job_filter,
+                           selected_status=status_filter)
+
+
+@app.route('/admin/retry-reminder/<candidate_id>/<job_id>', methods=['POST'])
+@admin_required
+@csrf.exempt
+def admin_retry_reminder(candidate_id, job_id):
+    """Clear a reminder record so the worker can send it again.
+
+    Does not send anything itself: it deletes the claim, and the next
+    worker pass picks the booking up -- but only if the slot is still
+    inside the reminder window, so a retry after the slot has passed
+    correctly does nothing.
+    """
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID'}), 400
+
+    removed = release_notification(candidate_id, job_id, channel='email')
+    if not removed:
+        return jsonify({'error': 'No reminder record found'}), 404
+
+    print(f"[ADMIN] Cleared reminder for candidate={candidate_id} "
+          f"job={job_id}; worker will retry if still in window")
+    return jsonify({
+        'success': True,
+        'message': ('Reminder cleared. It will be re-sent on the next '
+                    'worker pass, if the slot is still within the '
+                    'reminder window.'),
     })
 
 

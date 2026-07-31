@@ -24,9 +24,14 @@ TEMPLATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     'email_templates', 'kearney_slot_confirmed.html')
 
+# The shortly-before-your-slot reminder, sent by reminder_worker.py.
+REMINDER_TEMPLATE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'email_templates', 'kearney_slot_reminder.html')
 
-def _load_template():
-    with open(TEMPLATE_PATH, encoding='utf-8') as f:
+
+def _load_template(path=None):
+    with open(path or TEMPLATE_PATH, encoding='utf-8') as f:
         return f.read()
 
 
@@ -39,6 +44,37 @@ FAQ_DOCUMENT_LINK = os.environ.get(
 
 
 CONFIRMATION_EMAIL_TEMPLATE = _load_template()
+REMINDER_EMAIL_TEMPLATE = _load_template(REMINDER_TEMPLATE_PATH)
+
+
+def _render(template, substitutions):
+    """Substitute {{Placeholder}} tokens and verify none were missed.
+
+    A renamed placeholder in the template would otherwise reach the
+    candidate as literal "{{...}}" text -- and if it were the link, with
+    no way to join at all. Returns (html, error).
+    """
+    html_content = template
+    for token, value in substitutions:
+        html_content = html_content.replace(token, value if value else '')
+
+    leftover = re.findall(r'{{[^}]+}}', html_content)
+    if leftover:
+        msg = f"Email template has unsubstituted placeholders: {leftover}"
+        logger.error(msg)
+        print(f"[SES] ERROR: {msg}")
+        return None, msg
+    return html_content, None
+
+
+# MessageId of the most recent successful send. Read immediately after
+# a send via last_message_id(); it is overwritten by the next one.
+_last_message_id = {'id': None}
+
+
+def last_message_id():
+    """SES MessageId of the last successful send, or None."""
+    return _last_message_id.get('id')
 
 
 def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=None,
@@ -104,6 +140,12 @@ def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=N
         )
         print(f"[SES] Email sent successfully to {mail_to}. MessageId: {response['MessageId']}")
         logger.info(f"Email sent to {mail_to}. MessageId: {response['MessageId']}")
+        # The MessageId is the only handle on a specific send -- it is
+        # what an SES bounce notification refers back to, and what
+        # support needs to trace one candidate's email. Recorded on the
+        # last-send record rather than returned, so the (success, error)
+        # contract every existing caller unpacks stays unchanged.
+        _last_message_id['id'] = response['MessageId']
         return True, None
 
     except ClientError as e:
@@ -135,8 +177,7 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
     subject = (f"Your AI Interview Assessment is Confirmed – "
                f"{slot_date} {start_time} IST")
 
-    html_content = CONFIRMATION_EMAIL_TEMPLATE
-    for token, value in (
+    html_content, error = _render(CONFIRMATION_EMAIL_TEMPLATE, (
         ('{{Candidate Name}}', candidate_name),
         ('{{Job Name}}', job_name),
         ('{{Slot Date}}', f'{day_of_week}, {slot_date}'),
@@ -148,18 +189,50 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
         ('{{Assessment Link}}', interview_link_with_expiry),
         ('{{Unique Interview Link}}', interview_link_with_expiry),
         ('{{FAQ Document Link}}', FAQ_DOCUMENT_LINK),
-    ):
-        html_content = html_content.replace(token, value)
+    ))
+    if error:
+        return False, error
 
-    # A renamed placeholder in the template would otherwise reach the
-    # candidate as literal "{{...}}" text -- and if it were the link, with
-    # no way to join at all.
-    leftover = re.findall(r'{{[^}]+}}', html_content)
-    if leftover:
-        msg = f"Email template has unsubstituted placeholders: {leftover}"
-        logger.error(msg)
-        print(f"[SES] ERROR: {msg}")
-        return False, msg
+    return send_raw_email(
+        mail_to=candidate_email,
+        subject=subject,
+        html_content=html_content,
+        reply_to=[reply_to_addr],
+        company_name=effective_company,
+    )
+
+
+def send_slot_reminder(candidate_name, candidate_email, job_name,
+                       slot_date, day_of_week, start_time, end_time,
+                       interview_link_with_expiry, minutes_until,
+                       company_name=None, duration_minutes=None):
+    """Send the shortly-before-your-slot reminder to a candidate.
+
+    minutes_until is the rounded gap between now and the slot start, so
+    the subject and heading match what the candidate actually sees
+    rather than a hardcoded "15".
+
+    Returns: (success: bool, error_message: str | None)
+    """
+    effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
+    reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
+    duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
+    subject = (f"Starting soon: your AI interview at {start_time} IST "
+               f"({slot_date})")
+
+    html_content, error = _render(REMINDER_EMAIL_TEMPLATE, (
+        ('{{Candidate Name}}', candidate_name),
+        ('{{Job Name}}', job_name),
+        ('{{Slot Date}}', f'{day_of_week}, {slot_date}'),
+        ('{{Start Time}}', start_time),
+        ('{{End Time}}', end_time),
+        ('{{Duration}}', duration_text),
+        ('{{Minutes Until}}', str(minutes_until)),
+        ('{{Assessment Link}}', interview_link_with_expiry),
+        ('{{FAQ Document Link}}', FAQ_DOCUMENT_LINK),
+    ))
+    if error:
+        return False, error
 
     return send_raw_email(
         mail_to=candidate_email,

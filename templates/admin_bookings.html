@@ -54,6 +54,7 @@
                                 <th>Booked At</th>
                                 <th>Email Status</th>
                                 <th>Email Sent At</th>
+                                <th>Reminder</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
@@ -81,6 +82,25 @@
                                         <small>{{ booking.email_sent_at }}</small>
                                     {% else %}
                                         <small class="text-muted">—</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {# The 15-minute reminder, sent by
+                                       reminder_worker.py. "Scheduled" means
+                                       the slot has not come up yet. #}
+                                    {% if booking.reminder_status == 'sent' %}
+                                        <span class="badge bg-success"
+                                              title="Sent {{ booking.reminder_sent_at }}">Sent</span>
+                                    {% elif booking.reminder_status == 'failed' %}
+                                        <span class="badge bg-danger"
+                                              title="{{ booking.reminder_error or '' }}">Failed</span>
+                                    {% elif booking.reminder_status == 'skipped' %}
+                                        <span class="badge bg-warning text-dark"
+                                              title="{{ booking.reminder_error or '' }}">Skipped</span>
+                                    {% elif booking.reminder_status %}
+                                        <span class="badge bg-info">In progress</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Scheduled</span>
                                     {% endif %}
                                 </td>
                                 <td>

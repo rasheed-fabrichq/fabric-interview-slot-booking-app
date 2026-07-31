@@ -41,6 +41,23 @@
                 </div>
                 {% endif %}
 
+                {% if warnings %}
+                <div class="alert alert-info">
+                    <strong>Phone number warnings (showing first 50):</strong>
+                    <p class="mb-2"><small>These candidates were created and can
+                    book normally &mdash; they just will not receive a reminder
+                    call. Fix the numbers and re-upload only if you need the
+                    calls.</small></p>
+                    <div style="max-height: 300px; overflow-y: auto; padding: 10px; background-color: #fff; border: 1px solid #ddd; border-radius: 4px;">
+                        <ul class="mb-0" style="font-family: monospace; font-size: 0.85rem;">
+                            {% for warn in warnings %}
+                            <li style="margin-bottom: 8px; word-wrap: break-word;">{{ warn }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                {% endif %}
+
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -67,6 +84,13 @@
                             <li>Required columns: <code>Name</code>, <code>Email</code>,
                                 <code>Job Application Link</code>
                                 <small class="text-muted">(column names are not case-sensitive)</small></li>
+                            <li>Optional column: <code>Phone</code> &mdash; needed only
+                                for the reminder call. Accepts
+                                <code>9876543210</code>, <code>09876543210</code>,
+                                <code>+91 98765 43210</code> and similar; all are
+                                stored as <code>+919876543210</code>. A number that
+                                cannot be read is reported as a warning and the
+                                candidate is still created.</li>
                             <li>The candidate ID and job ID are read from the
                                 <code>Job Application Link</code>; both must be valid UUIDs</li>
                             <li>The job in each link must match the job selected above</li>
@@ -87,9 +111,9 @@
                 <h5 class="mb-0">Sample CSV Format</h5>
             </div>
             <div class="card-body">
-                <pre class="bg-light p-2 rounded small" style="white-space: pre-wrap; word-break: break-all;">Name,Email,Job Application Link
-John Doe,john@example.com,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=7f3e9a2c-4b1d-4f8e-9a2c-4b1d4f8e9a2c
-Jane Smith,jane@example.com,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=8a4f0b3d-5c2e-4a9f-8b3d-5c2e4a9f8b3d</pre>
+                <pre class="bg-light p-2 rounded small" style="white-space: pre-wrap; word-break: break-all;">Name,Email,Phone,Job Application Link
+John Doe,john@example.com,+919876543210,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=7f3e9a2c-4b1d-4f8e-9a2c-4b1d4f8e9a2c
+Jane Smith,jane@example.com,9876543211,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=8a4f0b3d-5c2e-4a9f-8b3d-5c2e4a9f8b3d</pre>
             </div>
         </div>
 

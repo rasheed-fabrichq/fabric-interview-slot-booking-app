@@ -87,6 +87,7 @@ def init_database():
             job_id TEXT NOT NULL,
             name TEXT NOT NULL,
             email TEXT NOT NULL,
+            phone TEXT,
             interview_link TEXT,
             status TEXT DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -95,6 +96,13 @@ def init_database():
             FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
         )
     ''')
+
+    # Phone is stored normalised to E.164 for the reminder call. Added
+    # after the fact, so an existing database needs the column too.
+    cursor.execute("PRAGMA table_info(candidates)")
+    candidate_columns = [col[1] for col in cursor.fetchall()]
+    if 'phone' not in candidate_columns:
+        cursor.execute('ALTER TABLE candidates ADD COLUMN phone TEXT')
 
     # Create index on candidate_id for faster lookups
     cursor.execute('''
@@ -173,6 +181,47 @@ def init_database():
     ''')
 
     # Create settings table for global application configuration
+    # Outbound reminders, one row per booking per channel per kind.
+    #
+    # The UNIQUE constraint is what makes reminders safe: the worker
+    # claims a reminder by INSERTing this row, so two workers racing on
+    # the same booking cannot both win, and a crashed-and-restarted
+    # worker will not re-send anything already claimed. Rows are created
+    # by the worker at send time rather than at booking time, so a
+    # rescheduled or released booking simply never gets claimed.
+    #
+    # channel: 'email' | 'call'   kind: 'reminder_15m'
+    # status:  'pending' | 'sent' | 'failed' | 'skipped'
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            slot_date TEXT,
+            slot_start_time TEXT,
+            scheduled_for DATETIME,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            provider_ref TEXT,
+            error TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(candidate_id, job_id, channel, kind)
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_notifications_lookup
+        ON notifications(candidate_id, job_id, channel, kind)
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_notifications_status
+        ON notifications(status, channel)
+    ''')
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -218,12 +267,12 @@ def seed_job_configs(cursor):
         #     'dates': []  # Dates will be added by admin
         # },
         {
-            'job_id': '5f36361d-5ffe-4535-8fa7-34c84c294383',
-            'job_name': 'Senior Associate – Business Management',
-            'start_time': '12:00',
+            'job_id': 'ea85d314-1bb4-4bba-8702-d983915c6da6',
+            'job_name': 'Summer intern - Senior Operations Analyst',
+            'start_time': '08:00',
             'end_time': '00:00',
-            'duration': 40,
-            'capacity': 30,
+            'duration': 30,
+            'capacity': 15,
             'dates': []  # Dates will be added by admin
         }
     ]
@@ -462,16 +511,21 @@ def delete_job_date(job_id, date):
 
 # ==================== CANDIDATE FUNCTIONS ====================
 
-def add_candidate(candidate_id, job_id, name, email, interview_link=None):
-    """Add a new candidate to the database"""
+def add_candidate(candidate_id, job_id, name, email, interview_link=None,
+                  phone=None):
+    """Add a new candidate to the database.
+
+    phone should already be normalised to E.164 by phone_utils; it is
+    stored as-is and dialled verbatim by the reminder call.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute('''
-            INSERT INTO candidates (candidate_id, job_id, name, email, interview_link, status)
-            VALUES (?, ?, ?, ?, ?, 'pending')
-        ''', (candidate_id, job_id, name, email, interview_link))
+            INSERT INTO candidates (candidate_id, job_id, name, email, phone, interview_link, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+        ''', (candidate_id, job_id, name, email, phone, interview_link))
         conn.commit()
         conn.close()
         return {'success': True}
@@ -524,6 +578,7 @@ def get_all_candidates(job_id=None):
                 c.job_id,
                 c.name,
                 c.email,
+                c.phone,
                 c.interview_link,
                 c.status,
                 c.created_at,
@@ -541,6 +596,7 @@ def get_all_candidates(job_id=None):
                 c.job_id,
                 c.name,
                 c.email,
+                c.phone,
                 c.interview_link,
                 c.status,
                 c.created_at,
@@ -1016,6 +1072,14 @@ def release_booking(candidate_id, job_id):
                 WHERE candidate_id = ? AND job_id = ?
             ''', (datetime.now(), candidate_id, job_id))
 
+            # Clear any reminder claim for the old slot. Without this a
+            # candidate who rebooks keeps the row from their previous
+            # booking, and the reminder for the new time is never sent.
+            cursor.execute('''
+                DELETE FROM notifications
+                WHERE candidate_id = ? AND job_id = ?
+            ''', (candidate_id, job_id))
+
             return {
                 'success': True,
                 'freed_date': booking['date'],
@@ -1134,6 +1198,212 @@ def set_booking_enabled(enabled):
     conn.close()
 
     return {'success': True, 'booking_enabled': enabled}
+
+
+# ==================== REMINDER NOTIFICATIONS ====================
+
+def get_bookings_due_for_reminder(lead_minutes, channel, kind='reminder_15m',
+                                  now=None, window_minutes=None):
+    """Bookings whose slot starts within the reminder window.
+
+    Returns bookings starting between now and now + lead_minutes that do
+    not already have a notification row for this channel/kind.
+
+    window_minutes bounds how far back a missed reminder is still worth
+    sending: if the worker was down, a booking whose slot already began
+    should not get a "starts in 15 minutes" email. None means the window
+    is exactly [now, now + lead_minutes] -- nothing already started.
+
+    Note the past-slot filtering happens in Python, not SQL, because
+    dates are stored as dd-mm-yyyy strings which do not compare
+    chronologically.
+    """
+    now = now or now_local()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT
+            c.candidate_id, c.name, c.email, c.phone, c.interview_link,
+            jc.job_name, b.job_id,
+            s.date, s.day_of_week, s.start_time,
+            jc.slot_duration_minutes
+        FROM bookings b
+        JOIN candidates c
+          ON b.candidate_id = c.candidate_id AND b.job_id = c.job_id
+        JOIN slots s ON b.slot_id = s.id
+        JOIN job_configs jc ON b.job_id = jc.job_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM notifications n
+            WHERE n.candidate_id = b.candidate_id
+              AND n.job_id = b.job_id
+              AND n.channel = ?
+              AND n.kind = ?
+        )
+    ''', (channel, kind))
+
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    horizon = now + timedelta(minutes=lead_minutes)
+    earliest = (now - timedelta(minutes=window_minutes)
+                if window_minutes else now)
+
+    due = []
+    for row in rows:
+        try:
+            slot_dt = datetime.strptime(
+                f"{row['date']} {row['start_time']}", '%d-%m-%Y %H:%M')
+        except ValueError:
+            continue
+        if earliest <= slot_dt <= horizon:
+            row['slot_datetime'] = slot_dt
+            due.append(row)
+
+    due.sort(key=lambda r: r['slot_datetime'])
+    return due
+
+
+def claim_notification(candidate_id, job_id, channel, kind, slot_date,
+                       slot_start_time, scheduled_for=None):
+    """Atomically claim the right to send one reminder.
+
+    Returns True if this caller won the claim and should send, False if
+    a row already existed -- meaning another worker (or an earlier run)
+    already has it. This is the single guard against double-sending, so
+    it must be called before doing any sending work, never after.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR IGNORE INTO notifications
+            (candidate_id, job_id, channel, kind, status, slot_date,
+             slot_start_time, scheduled_for, attempts)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 1)
+        ''', (candidate_id, job_id, channel, kind, slot_date,
+              slot_start_time, scheduled_for or now_local()))
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
+def mark_notification(candidate_id, job_id, channel, kind, status,
+                      error=None, provider_ref=None):
+    """Record the outcome of a claimed reminder."""
+    conn = get_db_connection()
+    try:
+        conn.execute('''
+            UPDATE notifications
+            SET status = ?, error = ?, provider_ref = ?, updated_at = ?
+            WHERE candidate_id = ? AND job_id = ? AND channel = ? AND kind = ?
+        ''', (status, error, provider_ref, now_local(),
+              candidate_id, job_id, channel, kind))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def release_notification(candidate_id, job_id, channel=None, kind=None):
+    """Delete notification rows so the reminder can be claimed again.
+
+    Used when a booking is reset, and by the admin retry action for a
+    reminder that failed.
+    """
+    conn = get_db_connection()
+    try:
+        query = ('DELETE FROM notifications '
+                 'WHERE candidate_id = ? AND job_id = ?')
+        params = [candidate_id, job_id]
+        if channel:
+            query += ' AND channel = ?'
+            params.append(channel)
+        if kind:
+            query += ' AND kind = ?'
+            params.append(kind)
+        cursor = conn.execute(query, params)
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def get_notification_log(job_id=None, status=None, channel=None):
+    """Every reminder attempt, newest first, with candidate details.
+
+    Left joins the candidate so a row still shows if the candidate was
+    later removed, rather than vanishing from the audit trail.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = '''
+        SELECT
+            n.candidate_id, n.job_id, n.channel, n.kind, n.status,
+            n.slot_date, n.slot_start_time, n.attempts, n.provider_ref,
+            n.error, n.created_at, n.updated_at,
+            c.name, c.email, c.phone,
+            jc.job_name
+        FROM notifications n
+        LEFT JOIN candidates c
+          ON n.candidate_id = c.candidate_id AND n.job_id = c.job_id
+        LEFT JOIN job_configs jc ON n.job_id = jc.job_id
+        WHERE 1 = 1
+    '''
+    params = []
+    if job_id:
+        query += ' AND n.job_id = ?'
+        params.append(job_id)
+    if status:
+        query += ' AND n.status = ?'
+        params.append(status)
+    if channel:
+        query += ' AND n.channel = ?'
+        params.append(channel)
+    query += ' ORDER BY n.updated_at DESC, n.id DESC'
+
+    cursor.execute(query, params)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_notification_stats(job_id=None):
+    """Counts per status, for the summary cards on the log page."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if job_id:
+        cursor.execute('''SELECT status, COUNT(*) AS n FROM notifications
+                          WHERE job_id = ? GROUP BY status''', (job_id,))
+    else:
+        cursor.execute('SELECT status, COUNT(*) AS n FROM notifications '
+                       'GROUP BY status')
+    counts = {r['status']: r['n'] for r in cursor.fetchall()}
+    conn.close()
+    counts['total'] = sum(counts.values())
+    return counts
+
+
+def get_notifications_for_bookings(channel=None):
+    """All notification rows, keyed by (candidate_id, job_id, channel).
+
+    Used by the admin bookings page to show reminder status without
+    running one query per row.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if channel:
+        cursor.execute('SELECT * FROM notifications WHERE channel = ?',
+                       (channel,))
+    else:
+        cursor.execute('SELECT * FROM notifications')
+    result = {}
+    for row in cursor.fetchall():
+        row = dict(row)
+        result[(row['candidate_id'], row['job_id'], row['channel'])] = row
+    conn.close()
+    return result
 
 
 if __name__ == '__main__':

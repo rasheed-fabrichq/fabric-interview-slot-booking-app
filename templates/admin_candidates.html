@@ -49,6 +49,7 @@
                                 <th>#</th>
                                 <th>Name</th>
                                 <th>Email</th>
+                                <th>Phone</th>
                                 <th>Job Position</th>
                                 <th>Status</th>
                                 <th>Candidate ID</th>
@@ -63,6 +64,15 @@
                                 <td>{{ loop.index }}</td>
                                 <td>{{ candidate.name }}</td>
                                 <td>{{ candidate.email }}</td>
+                                <td>
+                                    {# Phone is optional -- it is only needed
+                                       for the reminder call. #}
+                                    {% if candidate.phone %}
+                                        <span class="font-monospace">{{ candidate.phone }}</span>
+                                    {% else %}
+                                        <span class="text-muted" title="No phone number on record; this candidate cannot be called">&mdash;</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ candidate.job_name }}</td>
                                 <td>
                                     {% if candidate.status == 'pending' %}

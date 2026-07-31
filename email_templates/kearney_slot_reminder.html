@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kearney Summer Internship – Your AI Interview Starts Soon</title>
+<style>
+  body {
+    margin: 0; padding: 0; width: 100%;
+    background-color: #F4F6F8;
+    color: #1F2933;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  .outer-wrapper { background-color: #F4F6F8 !important; }
+  .card-border { padding: 1px; background-color: #E3E9ED; border-radius: 16px; }
+  .card {
+    width: 100%; background-color: #FFFFFF !important;
+    border-collapse: separate; border-radius: 15px; overflow: hidden;
+  }
+  .content-cell { padding: 40px 45px 30px 45px; }
+  .time-box {
+    background-color: #FFF8E6 !important;
+    border: 1px solid #F5D98B;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 24px 0;
+  }
+  .checklist-item {
+    font-size: 14px;
+    line-height: 1.7;
+    color: #3E4C59;
+    margin-bottom: 6px;
+  }
+  .footer-cell {
+    padding: 28px 45px;
+    background-color: #FAFBFC !important;
+    border-top: 1px solid #EEEEEE !important;
+  }
+</style>
+</head>
+<body style="background-color: #F4F6F8; margin: 0; padding: 0;">
+<table width="100%" border="0" cellspacing="0" cellpadding="0" role="presentation" class="outer-wrapper">
+<tr><td align="center" style="padding: 36px 12px;">
+<table width="100%" border="0" cellspacing="0" cellpadding="0" role="presentation" style="max-width: 640px;">
+<tr><td class="card-border">
+<table class="card" align="center" cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%">
+
+  <!-- Header -->
+  <tr><td style="padding: 32px 45px 0 45px;">
+    <p style="margin: 0; font-size: 20px; font-weight: 700; color: #0B4F6C; letter-spacing: 0.5px;">Kearney</p>
+    <p style="margin: 4px 0 0 0; font-size: 12px; color: #7B8794; letter-spacing: 0.3px;">Summer Internship Recruitment</p>
+    <div style="border-top: 2px dotted #DCE3E8; margin-top: 18px;"></div>
+  </td></tr>
+
+  <!-- Body -->
+  <tr><td class="content-cell">
+
+    <p style="margin: 0 0 18px 0; font-size: 22px; font-weight: 700; color: #1F2933;">
+      Your AI interview starts in about {{Minutes Until}} minutes
+    </p>
+
+    <p style="margin: 0 0 8px 0; font-size: 15px; line-height: 1.6; color: #3E4C59;">
+      Dear {{Candidate Name}},
+    </p>
+
+    <p style="margin: 0 0 18px 0; font-size: 15px; line-height: 1.6; color: #3E4C59;">
+      This is a reminder that your AI interview assessment for
+      <strong>{{Job Name}}</strong> is scheduled to begin shortly.
+      Please be ready to join at your scheduled time.
+    </p>
+
+    <!-- Scheduled time -->
+    <div class="time-box">
+      <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: 700; color: #8A6D3B; text-transform: uppercase; letter-spacing: 0.6px;">
+        Your Scheduled Slot
+      </p>
+      <p style="margin: 0; font-size: 15px; line-height: 1.8; color: #3E4C59;">
+        <strong>Date:</strong> {{Slot Date}}<br>
+        <strong>Time:</strong> {{Start Time}} &ndash; {{End Time}} IST<br>
+        <strong>Duration:</strong> {{Duration}}
+      </p>
+    </div>
+
+    <!-- Join button -->
+    <table border="0" cellspacing="0" cellpadding="0" role="presentation" style="margin: 26px 0;">
+      <tr><td align="center" bgcolor="#0B4F6C" style="border-radius: 8px;">
+        <a href="{{Assessment Link}}"
+           style="display: inline-block; padding: 15px 38px; font-size: 16px; font-weight: 700; color: #FFFFFF; text-decoration: none; border-radius: 8px;">
+          Join Your Assessment
+        </a>
+      </td></tr>
+    </table>
+
+    <!-- Proctoring -->
+    <p style="margin: 0 0 4px 0; font-size: 15px; font-weight: 700; color: #B23B2E;">
+      <span style="font-size: 17px;">&#9888;</span> Important: Please Note
+    </p>
+    <p style="margin: 0 0 10px 0; font-size: 15px; font-weight: 700; color: #1F2933;">
+      Proctoring
+    </p>
+    <p class="checklist-item">&bull; The session is recorded and fully proctored. Camera and microphone must stay on.</p>
+    <p class="checklist-item">&bull; Our system flags AI tool usage, additional faces, and other voices.</p>
+    <p class="checklist-item">&bull; Every recording is reviewed by our team. In previous rounds, candidates were identified this way and disqualified.</p>
+    <p class="checklist-item">&bull; This round assesses how you think, not what you can look up &mdash; outside help is obvious under cross-questioning and scores worse than honest reasoning.</p>
+
+    <!-- What to avoid -->
+    <p style="margin: 22px 0 10px 0; font-size: 15px; font-weight: 700; color: #1F2933;">
+      What to avoid
+    </p>
+    <p class="checklist-item">&bull; <strong>Long silences</strong> &mdash; think aloud. Need a moment? Just say so.</p>
+    <p class="checklist-item">&bull; <strong>Generic answers</strong> &mdash; use your own projects and experience, not textbook definitions.</p>
+
+    <p style="margin: 22px 0 0 0; font-size: 14px; line-height: 1.6; color: #3E4C59;">
+      For any questions, please refer to the
+      <a href="{{FAQ Document Link}}" style="color: #0B4F6C; font-weight: 600;">FAQ document</a>
+      or write to us at
+      <a href="mailto:support@fabrichq.ai" style="color: #0B4F6C; font-weight: 600;">support@fabrichq.ai</a>.
+    </p>
+
+    <p style="margin: 26px 0 0 0; font-size: 15px; line-height: 1.6; color: #3E4C59;">
+      All the best,<br>
+      <strong>Team Kearney</strong>
+    </p>
+
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td class="footer-cell">
+    <p style="margin: 0; font-size: 12px; line-height: 1.6; color: #9AA5B1;">
+      This is an automated reminder for your scheduled AI interview
+      assessment. Please do not reply directly to this message.
+    </p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
