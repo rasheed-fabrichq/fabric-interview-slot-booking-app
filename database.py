@@ -212,6 +212,54 @@ def init_database():
         )
     ''')
 
+    # One row per reminder call placed, tracking it from queued through
+    # to its outcome.
+    #
+    # Separate from notifications: that table owns the *claim* (one call
+    # per booking, never twice), this one owns the *outcome*. Keeping
+    # them apart means the dozen call-specific columns do not bloat the
+    # table the email channel also uses.
+    #
+    # status: queued | in_progress | completed | failed | cancelled
+    # request_payload holds exactly what was sent, including the phone
+    # number and every spoken variable, so a call can be explained after
+    # the fact without guessing what the agent was told.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            execution_id TEXT UNIQUE,
+            phone TEXT,
+            status TEXT NOT NULL DEFAULT 'queued',
+            call_successful INTEGER,
+            hangup_reason TEXT,
+            duration_seconds REAL,
+            cost REAL,
+            transcript TEXT,
+            recording_available INTEGER DEFAULT 0,
+            slot_date TEXT,
+            slot_start_time TEXT,
+            request_payload TEXT,
+            raw_response TEXT,
+            error TEXT,
+            poll_attempts INTEGER NOT NULL DEFAULT 0,
+            placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_polled_at DATETIME,
+            completed_at DATETIME
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_call_logs_status
+        ON call_logs(status)
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_call_logs_candidate
+        ON call_logs(candidate_id, job_id)
+    ''')
+
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_notifications_lookup
         ON notifications(candidate_id, job_id, channel, kind)
@@ -1327,6 +1375,169 @@ def release_notification(candidate_id, job_id, channel=None, kind=None):
         return cursor.rowcount
     finally:
         conn.close()
+
+
+# ==================== CALL LOGS ====================
+
+def create_call_log(candidate_id, job_id, execution_id, phone,
+                    slot_date, slot_start_time, request_payload,
+                    status='queued'):
+    """Record a call the moment it is accepted by the calling system."""
+    import json as _json
+    conn = get_db_connection()
+    try:
+        conn.execute('''
+            INSERT OR REPLACE INTO call_logs
+            (candidate_id, job_id, execution_id, phone, status,
+             slot_date, slot_start_time, request_payload, placed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (candidate_id, job_id, execution_id, phone, status,
+              slot_date, slot_start_time,
+              _json.dumps(request_payload) if request_payload else None,
+              now_local()))
+        conn.commit()
+        return {'success': True}
+    finally:
+        conn.close()
+
+
+def get_pollable_call_logs(batch_size=20, max_attempts=60):
+    """Calls that have not reached a terminal state yet.
+
+    Bounded by max_attempts so a call the provider never closes out
+    cannot be polled forever. Oldest first, so nothing starves.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT * FROM call_logs
+        WHERE status IN ('queued', 'in_progress')
+          AND execution_id IS NOT NULL
+          AND poll_attempts < ?
+        ORDER BY placed_at
+        LIMIT ?
+    ''', (max_attempts, batch_size))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def update_call_log(execution_id, **fields):
+    """Update one call log by its execution id."""
+    allowed = ('status', 'call_successful', 'hangup_reason',
+               'duration_seconds', 'cost', 'transcript',
+               'recording_available', 'raw_response', 'error',
+               'poll_attempts', 'last_polled_at', 'completed_at')
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return {'error': 'No valid fields provided'}
+
+    assignments = ', '.join(f'{k} = ?' for k in updates)
+    conn = get_db_connection()
+    try:
+        conn.execute(f'UPDATE call_logs SET {assignments} '
+                     f'WHERE execution_id = ?',
+                     (*updates.values(), execution_id))
+        conn.commit()
+        return {'success': True}
+    finally:
+        conn.close()
+
+
+def bump_call_poll_attempt(execution_id):
+    """Count a poll, so a stuck call eventually stops being polled."""
+    conn = get_db_connection()
+    try:
+        conn.execute('''
+            UPDATE call_logs
+            SET poll_attempts = poll_attempts + 1, last_polled_at = ?
+            WHERE execution_id = ?
+        ''', (now_local(), execution_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_call_logs(job_id=None, status=None, outcome=None):
+    """Every call placed, newest first, with candidate details."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = '''
+        SELECT
+            cl.*,
+            c.name, c.email,
+            jc.job_name
+        FROM call_logs cl
+        LEFT JOIN candidates c
+          ON cl.candidate_id = c.candidate_id AND cl.job_id = c.job_id
+        LEFT JOIN job_configs jc ON cl.job_id = jc.job_id
+        WHERE 1 = 1
+    '''
+    params = []
+    if job_id:
+        query += ' AND cl.job_id = ?'
+        params.append(job_id)
+    if status:
+        query += ' AND cl.status = ?'
+        params.append(status)
+    if outcome == 'answered':
+        query += ' AND cl.call_successful = 1'
+    elif outcome == 'not_answered':
+        query += ' AND cl.call_successful = 0'
+    query += ' ORDER BY cl.placed_at DESC, cl.id DESC'
+
+    cursor.execute(query, params)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_call_log(execution_id):
+    """One call log with candidate details, or None."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT cl.*, c.name, c.email, jc.job_name
+        FROM call_logs cl
+        LEFT JOIN candidates c
+          ON cl.candidate_id = c.candidate_id AND cl.job_id = c.job_id
+        LEFT JOIN job_configs jc ON cl.job_id = jc.job_id
+        WHERE cl.execution_id = ?
+    ''', (execution_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_call_stats(job_id=None):
+    """Counts for the dashboard summary cards."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    where = ' WHERE job_id = ?' if job_id else ''
+    params = (job_id,) if job_id else ()
+
+    cursor.execute(f'SELECT COUNT(*) AS n FROM call_logs{where}', params)
+    total = cursor.fetchone()['n']
+
+    cursor.execute(f'''SELECT COUNT(*) AS n FROM call_logs{where}
+                       {"AND" if where else "WHERE"} status IN
+                       ('queued', 'in_progress')''', params)
+    in_progress = cursor.fetchone()['n']
+
+    cursor.execute(f'''SELECT COUNT(*) AS n FROM call_logs{where}
+                       {"AND" if where else "WHERE"}
+                       call_successful = 1''', params)
+    answered = cursor.fetchone()['n']
+
+    cursor.execute(f'''SELECT COUNT(*) AS n FROM call_logs{where}
+                       {"AND" if where else "WHERE"}
+                       call_successful = 0''', params)
+    not_answered = cursor.fetchone()['n']
+
+    conn.close()
+    return {'total': total, 'in_progress': in_progress,
+            'answered': answered, 'not_answered': not_answered}
 
 
 def get_notification_log(job_id=None, status=None, channel=None):

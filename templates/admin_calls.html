@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+
+{% block title %}Reminder Calls{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2>Reminder Calls</h2>
+            <div>
+                <a href="/admin/notifications" class="btn btn-outline-secondary">Reminder Log</a>
+                <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
+            </div>
+        </div>
+        <p class="text-muted">
+            Every reminder call placed, and what became of it. Status is
+            polled from the calling system until the call ends.
+            <strong>Answered</strong> means the candidate picked up and
+            stayed on the line &mdash; a call that rang out, was rejected or
+            hit voicemail counts as not answered.
+        </p>
+    </div>
+</div>
+
+<!-- Summary -->
+<div class="row mb-4">
+    <div class="col-6 col-md-3 mb-2">
+        <div class="card text-center h-100">
+            <div class="card-body py-3">
+                <h3 class="mb-0">{{ stats.total }}</h3>
+                <small class="text-muted">Calls placed</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 mb-2">
+        <div class="card text-center h-100 border-success">
+            <div class="card-body py-3">
+                <h3 class="mb-0 text-success">{{ stats.answered }}</h3>
+                <small class="text-muted">Answered</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 mb-2">
+        <div class="card text-center h-100 {% if stats.not_answered %}border-warning{% endif %}">
+            <div class="card-body py-3">
+                <h3 class="mb-0 {% if stats.not_answered %}text-warning{% endif %}">{{ stats.not_answered }}</h3>
+                <small class="text-muted">Not answered</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 mb-2">
+        <div class="card text-center h-100">
+            <div class="card-body py-3">
+                <h3 class="mb-0">{{ stats.in_progress }}</h3>
+                <small class="text-muted">In progress</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="row mb-3">
+    <div class="col-12">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label mb-1"><small>Job</small></label>
+                <select name="job_id" class="form-select form-select-sm">
+                    <option value="">All jobs</option>
+                    {% for jid, jname in jobs.items() %}
+                    <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1"><small>Status</small></label>
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for s in ['queued', 'in_progress', 'completed', 'failed', 'cancelled'] %}
+                    <option value="{{ s }}" {% if selected_status == s %}selected{% endif %}>{{ s|replace('_', ' ')|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1"><small>Outcome</small></label>
+                <select name="outcome" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    <option value="answered" {% if selected_outcome == 'answered' %}selected{% endif %}>Answered</option>
+                    <option value="not_answered" {% if selected_outcome == 'not_answered' %}selected{% endif %}>Not answered</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-sm btn-primary">Filter</button>
+                <a href="/admin/calls" class="btn btn-sm btn-outline-secondary">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-body">
+                {% if calls %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>#</th>
+                                <th>Candidate</th>
+                                <th>Phone</th>
+                                <th>Slot</th>
+                                <th>Status</th>
+                                <th>Outcome</th>
+                                <th>Duration</th>
+                                <th>Placed</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for call in calls %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>
+                                    {{ call.name or '(candidate removed)' }}
+                                    {% if call.job_name %}
+                                    <br><small class="text-muted">{{ call.job_name }}</small>
+                                    {% endif %}
+                                </td>
+                                <td><small class="font-monospace">{{ call.phone or '—' }}</small></td>
+                                <td><small>{{ call.slot_date }} {{ call.slot_start_time }}</small></td>
+                                <td>
+                                    {% if call.status == 'completed' %}
+                                        <span class="badge bg-success">Completed</span>
+                                    {% elif call.status == 'failed' %}
+                                        <span class="badge bg-danger">Failed</span>
+                                    {% elif call.status == 'cancelled' %}
+                                        <span class="badge bg-secondary">Cancelled</span>
+                                    {% elif call.status == 'in_progress' %}
+                                        <span class="badge bg-info text-dark">In progress</span>
+                                    {% else %}
+                                        <span class="badge bg-light text-dark">Queued</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if call.call_successful == 1 %}
+                                        <span class="badge bg-success">Answered</span>
+                                    {% elif call.call_successful == 0 %}
+                                        <span class="badge bg-warning text-dark"
+                                              title="{{ call.hangup_reason or '' }}">
+                                            {{ call.hangup_reason or 'Not answered' }}
+                                        </span>
+                                    {% else %}
+                                        <small class="text-muted">—</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if call.duration_seconds %}
+                                    <small>{{ call.duration_seconds|round(0)|int }}s</small>
+                                    {% else %}
+                                    <small class="text-muted">—</small>
+                                    {% endif %}
+                                </td>
+                                <td><small>{{ call.placed_at }}</small></td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary"
+                                            data-bs-toggle="collapse"
+                                            data-bs-target="#detail-{{ call.id }}">
+                                        <i class="bi bi-chevron-down"></i> View
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="collapse" id="detail-{{ call.id }}">
+                                <td colspan="9" class="bg-light">
+                                    <div class="row">
+                                        <div class="col-md-5">
+                                            <h6 class="mb-2">What the agent was told</h6>
+                                            {% if call.variables %}
+                                            <table class="table table-sm table-borderless mb-3">
+                                                {% for key, value in call.variables.items() %}
+                                                <tr>
+                                                    <td class="text-muted" style="width: 45%;">
+                                                        <small>{{ key|replace('_', ' ') }}</small>
+                                                    </td>
+                                                    <td><small><strong>{{ value }}</strong></small></td>
+                                                </tr>
+                                                {% endfor %}
+                                            </table>
+                                            {% else %}
+                                            <p class="text-muted small">No payload recorded.</p>
+                                            {% endif %}
+
+                                            <h6 class="mb-2">Call</h6>
+                                            <table class="table table-sm table-borderless">
+                                                <tr>
+                                                    <td class="text-muted" style="width: 45%;"><small>Execution ID</small></td>
+                                                    <td><small class="font-monospace">{{ call.execution_id }}</small></td>
+                                                </tr>
+                                                {% if call.hangup_reason %}
+                                                <tr>
+                                                    <td class="text-muted"><small>Hangup reason</small></td>
+                                                    <td><small>{{ call.hangup_reason }}</small></td>
+                                                </tr>
+                                                {% endif %}
+                                                {% if call.cost %}
+                                                <tr>
+                                                    <td class="text-muted"><small>Cost</small></td>
+                                                    <td><small>{{ call.cost }}</small></td>
+                                                </tr>
+                                                {% endif %}
+                                                {% if call.completed_at %}
+                                                <tr>
+                                                    <td class="text-muted"><small>Completed</small></td>
+                                                    <td><small>{{ call.completed_at }}</small></td>
+                                                </tr>
+                                                {% endif %}
+                                                {% if call.error %}
+                                                <tr>
+                                                    <td class="text-muted"><small>Last error</small></td>
+                                                    <td><small class="text-danger">{{ call.error }}</small></td>
+                                                </tr>
+                                                {% endif %}
+                                            </table>
+
+                                            {% if call.recording_available %}
+                                            <h6 class="mb-2">Recording</h6>
+                                            {# Served through our own route: the
+                                               provider's URL expires. #}
+                                            <audio controls preload="none" class="w-100 mb-2">
+                                                <source src="/admin/call-recording/{{ call.execution_id }}">
+                                                Your browser cannot play this recording.
+                                            </audio>
+                                            <a href="/admin/call-recording/{{ call.execution_id }}"
+                                               class="btn btn-sm btn-outline-secondary" download>
+                                                <i class="bi bi-download"></i> Download
+                                            </a>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-7">
+                                            <h6 class="mb-2">Transcript</h6>
+                                            {% if call.transcript %}
+                                            <pre class="bg-white border rounded p-3 small"
+                                                 style="max-height: 400px; overflow-y: auto; white-space: pre-wrap;">{{ call.transcript }}</pre>
+                                            {% else %}
+                                            <p class="text-muted small">
+                                                No transcript &mdash; the call was not
+                                                answered, or the conversation was too
+                                                short to record anything.
+                                            </p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted mt-3 mb-0">Showing {{ calls|length }} call(s).</p>
+                {% else %}
+                <div class="alert alert-info mb-0">
+                    No calls placed yet.
+                    {% if selected_job or selected_status or selected_outcome %}
+                    <a href="/admin/calls">Clear the filters</a> to see all calls.
+                    {% else %}
+                    Calls appear here once the reminder worker places its first
+                    one. Check <code>CALLS_ENABLED</code> is set and the worker
+                    is running.
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

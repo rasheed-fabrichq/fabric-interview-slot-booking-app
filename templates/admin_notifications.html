@@ -66,13 +66,21 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label mb-1"><small>Status</small></label>
                 <select name="status" class="form-select form-select-sm">
                     <option value="">All statuses</option>
                     {% for s in ['sent', 'failed', 'skipped', 'pending'] %}
                     <option value="{{ s }}" {% if selected_status == s %}selected{% endif %}>{{ s|capitalize }}</option>
                     {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1"><small>Channel</small></label>
+                <select name="channel" class="form-select form-select-sm">
+                    <option value="">All channels</option>
+                    <option value="email" {% if selected_channel == 'email' %}selected{% endif %}>Email</option>
+                    <option value="call" {% if selected_channel == 'call' %}selected{% endif %}>Call</option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -113,12 +121,26 @@
                                     <br><small class="text-muted">{{ n.job_name }}</small>
                                     {% endif %}
                                 </td>
-                                <td><small>{{ n.email or '—' }}</small></td>
+                                <td>
+                                    {# Show whichever contact the channel
+                                       actually used. #}
+                                    {% if n.channel == 'call' %}
+                                    <small class="font-monospace">{{ n.phone or '—' }}</small>
+                                    {% else %}
+                                    <small>{{ n.email or '—' }}</small>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <small>{{ n.slot_date or '—' }}
                                     {% if n.slot_start_time %}{{ n.slot_start_time }}{% endif %}</small>
                                 </td>
-                                <td><small class="text-muted">{{ n.channel }}</small></td>
+                                <td>
+                                    {% if n.channel == 'call' %}
+                                    <span class="badge bg-info text-dark"><i class="bi bi-telephone"></i> Call</span>
+                                    {% else %}
+                                    <span class="badge bg-light text-dark"><i class="bi bi-envelope"></i> Email</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     {% if n.status == 'sent' %}
                                         <span class="badge bg-success">Sent</span>
@@ -148,8 +170,9 @@
                                     <button class="btn btn-sm btn-outline-primary retry-btn"
                                             data-candidate-id="{{ n.candidate_id }}"
                                             data-job-id="{{ n.job_id }}"
+                                            data-channel="{{ n.channel }}"
                                             data-name="{{ n.name or n.candidate_id }}"
-                                            title="Clear this record so the worker can send it again">
+                                            title="Clear this record so the worker can try again">
                                         <i class="bi bi-arrow-clockwise"></i> Retry
                                     </button>
                                 </td>
@@ -183,11 +206,13 @@ document.querySelectorAll('.retry-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
         var candidateId = this.dataset.candidateId;
         var jobId = this.dataset.jobId;
+        var channel = this.dataset.channel || 'email';
         var name = this.dataset.name;
         var button = this;
 
-        if (!confirm('Clear the reminder record for ' + name + '?\n\n' +
-                     'The worker will send it again on its next pass, but ' +
+        var what = channel === 'call' ? 'reminder call' : 'reminder email';
+        if (!confirm('Clear the ' + what + ' record for ' + name + '?\n\n' +
+                     'The worker will try again on its next pass, but ' +
                      'only if the slot is still within the reminder window.')) {
             return;
         }
@@ -195,7 +220,8 @@ document.querySelectorAll('.retry-btn').forEach(function (btn) {
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
-        fetch('/admin/retry-reminder/' + candidateId + '/' + jobId, {
+        fetch('/admin/retry-reminder/' + candidateId + '/' + jobId +
+              '?channel=' + encodeURIComponent(channel), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         })

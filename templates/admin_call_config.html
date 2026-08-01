@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}Call Settings - Admin{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2>Reminder Call Settings</h2>
+            <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
+        </div>
+        <p class="text-muted">
+            Per-job overrides for the reminder call. Leave a field blank to
+            use the value from <code>.env</code> &mdash; shown as the
+            placeholder in each box. A job with nothing set here behaves
+            exactly as before.
+        </p>
+        <div class="alert alert-warning">
+            <strong><i class="bi bi-exclamation-triangle"></i> Overrides are
+            currently hardcoded.</strong>
+            Saving here changes only the running web process &mdash; the
+            reminder worker is a separate process and will not see it, and
+            the change is lost on restart. To apply an override for real,
+            edit <code>JOB_CALL_CONFIGS</code> in
+            <code>job_call_settings.py</code> and restart both processes.
+            This page becomes fully functional once the settings move into
+            the database.
+        </div>
+    </div>
+</div>
+
+{% if success %}
+<div class="alert alert-success alert-dismissible fade show">
+    {{ success }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-danger alert-dismissible fade show">
+    {{ error }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<div class="row">
+    <div class="col-lg-7 mb-4">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-telephone"></i> Configure a Job</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Job</strong> <span class="text-danger">*</span></label>
+                        <select name="job_id" id="job-select" class="form-select" required>
+                            <option value="">Select a job…</option>
+                            {% for jid, jname in jobs.items() %}
+                            <option value="{{ jid }}">{{ jname }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Reminder calls</strong></label>
+                        <select name="calls_enabled" class="form-select">
+                            <option value="inherit">Use the .env setting (currently {{ defaults.calls_enabled }})</option>
+                            <option value="on">On for this job</option>
+                            <option value="off">Off for this job</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Assistant ID</strong></label>
+                        <input type="text" name="assistant_id" class="form-control"
+                               placeholder="{{ defaults.assistant_id or 'not set in .env' }}">
+                        <small class="text-muted">The assistant the calling system should run.</small>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><strong>Agent name</strong></label>
+                            <input type="text" name="agent_name" class="form-control"
+                                   placeholder="{{ defaults.agent_name }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><strong>Company name</strong></label>
+                            <input type="text" name="company_name" class="form-control"
+                                   placeholder="{{ defaults.company_name }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Spoken role</strong></label>
+                        <input type="text" name="role_name" class="form-control"
+                               placeholder="defaults to the job name">
+                        <small class="text-muted">
+                            What the agent calls the position. Useful when the
+                            internal job name is not what you want read aloud.
+                        </small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Disqualification rate</strong></label>
+                        <input type="text" name="disqualification_rate" class="form-control"
+                               placeholder="{{ defaults.disqualification_rate }}">
+                        <small class="text-muted">
+                            Spoken aloud, so write it in words &mdash;
+                            &ldquo;eighty percent&rdquo;, not &ldquo;80%&rdquo;.
+                        </small>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><strong>Call lead (minutes)</strong></label>
+                            <input type="number" name="lead_minutes" class="form-control"
+                                   min="1" placeholder="{{ defaults.lead_minutes }}">
+                            <small class="text-muted">How long before the slot to call.</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><strong>Agent type</strong></label>
+                            <input type="text" name="agent_type" class="form-control"
+                                   placeholder="{{ defaults.agent_type }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Calling system URL</strong></label>
+                        <input type="text" name="api_base_url" class="form-control"
+                               placeholder="{{ defaults.api_base_url }}">
+                        <small class="text-muted">Only set this if this job uses a different service.</small>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-save"></i> Save Call Settings
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5 mb-4">
+        <div class="card shadow">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0"><i class="bi bi-list-check"></i> Current Overrides</h5>
+            </div>
+            <div class="card-body">
+                {% if call_configs %}
+                {% for jid, cfg in call_configs.items() %}
+                <div class="border rounded p-2 mb-2">
+                    <strong>{{ jobs.get(jid, jid) }}</strong>
+                    <ul class="mb-0 mt-1 small text-muted list-unstyled">
+                        {% if cfg.calls_enabled is not none %}
+                        <li>Calls:
+                            {% if cfg.calls_enabled %}
+                            <span class="badge bg-success">On</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Off</span>
+                            {% endif %}
+                        </li>
+                        {% endif %}
+                        {% if cfg.assistant_id %}<li>Assistant: <code>{{ cfg.assistant_id[:18] }}…</code></li>{% endif %}
+                        {% if cfg.agent_name %}<li>Agent: {{ cfg.agent_name }}</li>{% endif %}
+                        {% if cfg.company_name %}<li>Company: {{ cfg.company_name }}</li>{% endif %}
+                        {% if cfg.role_name %}<li>Role: {{ cfg.role_name }}</li>{% endif %}
+                        {% if cfg.disqualification_rate %}<li>Rate: {{ cfg.disqualification_rate }}</li>{% endif %}
+                        {% if cfg.lead_minutes %}<li>Lead: {{ cfg.lead_minutes }} min</li>{% endif %}
+                        {% if cfg.api_base_url %}<li>URL: {{ cfg.api_base_url }}</li>{% endif %}
+                    </ul>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="text-muted mb-0">
+                    No job overrides yet. Every job uses the
+                    <code>.env</code> defaults.
+                </p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="alert alert-info mt-3">
+            <strong><i class="bi bi-info-circle"></i> Before enabling calls</strong>
+            <ul class="mb-0 mt-2 small">
+                <li>Check the payload first:
+                    <code>python reminder_worker.py --once --dry-run</code></li>
+                <li>Candidates without a phone number are skipped, not failed</li>
+                <li>Results appear in the
+                    <a href="/admin/notifications?channel=call">Reminder Log</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

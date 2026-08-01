@@ -7,6 +7,7 @@ load_dotenv()
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session, Response
 import io
+import json
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.utils import secure_filename
 import pandas as pd
@@ -32,8 +33,13 @@ from database import (
     create_job, update_job_date_times,
     update_booking_email_status, get_booking_with_details,
     get_notifications_for_bookings, release_notification,
-    get_notification_log, get_notification_stats
+    get_notification_log, get_notification_stats,
+    get_call_logs, get_call_log, get_call_stats
 )
+from job_call_settings import (
+    get_all_job_call_configs, update_job_call_config, get_job_call_config
+)
+from caller_utils import get_recording_url
 from config import (
     get_jobs, is_valid_job_id, get_job_name,
     ADMIN_USERNAME, ADMIN_PASSWORD
@@ -1131,19 +1137,160 @@ def admin_release_booking(candidate_id, job_id):
     })
 
 
+@app.route('/admin/calls')
+@admin_required
+def admin_calls():
+    """Every reminder call placed, and what became of it."""
+    job_id = request.args.get('job_id')
+    status = request.args.get('status')
+    outcome = request.args.get('outcome')
+
+    job_filter = job_id if job_id and is_valid_job_id(job_id) else None
+    status_filter = status if status in (
+        'queued', 'in_progress', 'completed', 'failed', 'cancelled') else None
+    outcome_filter = outcome if outcome in (
+        'answered', 'not_answered') else None
+
+    calls = get_call_logs(job_id=job_filter, status=status_filter,
+                          outcome=outcome_filter)
+
+    # The stored payload is what the agent was actually told, so it is
+    # shown per row rather than being re-derived.
+    for call in calls:
+        variables = {}
+        if call.get('request_payload'):
+            try:
+                payload = json.loads(call['request_payload'])
+                variables = payload.get('assistant_overrides', {}).get(
+                    'variable_values', {})
+            except (ValueError, TypeError):
+                variables = {}
+        call['variables'] = variables
+
+    return render_template('admin_calls.html',
+                           calls=calls,
+                           stats=get_call_stats(job_id=job_filter),
+                           jobs=get_jobs(),
+                           selected_job=job_filter,
+                           selected_status=status_filter,
+                           selected_outcome=outcome_filter)
+
+
+@app.route('/admin/call-recording/<execution_id>')
+@admin_required
+def admin_call_recording(execution_id):
+    """Redirect to the calling system's recording for one call.
+
+    The provider's URL expires, so it is never stored. This resolves it
+    at click time instead.
+    """
+    call = get_call_log(execution_id)
+    if not call:
+        return 'Call not found', 404
+    if not call.get('recording_available'):
+        return 'No recording available for this call', 404
+
+    return redirect(get_recording_url(
+        execution_id, job_config=get_job_call_config(call['job_id'])))
+
+
+@app.route('/admin/call-config', methods=['GET', 'POST'])
+@admin_required
+def admin_call_config():
+    """Per-job overrides for the reminder call.
+
+    Every field is optional: a blank field clears the override and the
+    job falls back to the .env default, so a single-job deployment can
+    ignore this page entirely.
+    """
+    error = None
+    success = None
+
+    if request.method == 'POST':
+        job_id = request.form.get('job_id')
+        if not is_valid_job_id(job_id):
+            error = 'Invalid job ID'
+        else:
+            def blank_to_none(field):
+                value = (request.form.get(field) or '').strip()
+                return value or None
+
+            calls_enabled = request.form.get('calls_enabled')
+            # 'inherit' leaves the column NULL so the env value applies.
+            enabled_value = (None if calls_enabled == 'inherit'
+                             else (1 if calls_enabled == 'on' else 0))
+
+            lead = blank_to_none('lead_minutes')
+            try:
+                lead_value = int(lead) if lead else None
+                if lead_value is not None and lead_value <= 0:
+                    raise ValueError
+            except ValueError:
+                lead_value = None
+                error = 'Lead minutes must be a positive whole number'
+
+            if not error:
+                update_job_call_config(
+                    job_id,
+                    calls_enabled=enabled_value,
+                    assistant_id=blank_to_none('assistant_id'),
+                    agent_type=blank_to_none('agent_type'),
+                    agent_name=blank_to_none('agent_name'),
+                    company_name=blank_to_none('company_name'),
+                    role_name=blank_to_none('role_name'),
+                    disqualification_rate=blank_to_none(
+                        'disqualification_rate'),
+                    lead_minutes=lead_value,
+                    api_base_url=blank_to_none('api_base_url'),
+                )
+                # Overrides are hardcoded in job_call_settings.py for
+                # now, so a save from here only affects this process.
+                success = (
+                    f'Call settings applied for {get_job_name(job_id)} '
+                    f'in this process only. To make the change permanent, '
+                    f'add it to JOB_CALL_CONFIGS in job_call_settings.py '
+                    f'— the reminder worker runs separately and will not '
+                    f'see it otherwise.')
+
+    # The env values, shown as the placeholder in each field so it is
+    # clear what a blank field will fall back to.
+    defaults = {
+        'assistant_id': os.environ.get('CALLER_ASSISTANT_ID', ''),
+        'agent_type': os.environ.get('CALLER_AGENT_TYPE',
+                                     'integrity_reminder'),
+        'agent_name': os.environ.get('CALLER_AGENT_NAME', 'Riya'),
+        'company_name': os.environ.get('CALLER_COMPANY_NAME', 'Kearney'),
+        'disqualification_rate': os.environ.get(
+            'CALL_DISQUALIFICATION_RATE', 'eighty percent'),
+        'lead_minutes': os.environ.get('CALL_LEAD_MINUTES', '30'),
+        'api_base_url': os.environ.get('CALLER_API_BASE_URL',
+                                       'http://localhost:8000'),
+        'calls_enabled': os.environ.get('CALLS_ENABLED', 'false'),
+    }
+
+    return render_template('admin_call_config.html',
+                           jobs=get_jobs(),
+                           call_configs=get_all_job_call_configs(),
+                           defaults=defaults,
+                           error=error,
+                           success=success)
+
+
 @app.route('/admin/notifications')
 @admin_required
 def admin_notifications():
     """Log of every reminder the worker has attempted."""
     job_id = request.args.get('job_id')
     status = request.args.get('status')
+    channel = request.args.get('channel')
 
     job_filter = job_id if job_id and is_valid_job_id(job_id) else None
     status_filter = status if status in (
         'sent', 'failed', 'skipped', 'pending') else None
+    channel_filter = channel if channel in ('email', 'call') else None
 
     notifications = get_notification_log(
-        job_id=job_filter, status=status_filter)
+        job_id=job_filter, status=status_filter, channel=channel_filter)
     stats = get_notification_stats(job_id=job_filter)
 
     return render_template('admin_notifications.html',
@@ -1151,7 +1298,8 @@ def admin_notifications():
                            stats=stats,
                            jobs=get_jobs(),
                            selected_job=job_filter,
-                           selected_status=status_filter)
+                           selected_status=status_filter,
+                           selected_channel=channel_filter)
 
 
 @app.route('/admin/retry-reminder/<candidate_id>/<job_id>', methods=['POST'])
@@ -1168,17 +1316,24 @@ def admin_retry_reminder(candidate_id, job_id):
     if not is_valid_job_id(job_id):
         return jsonify({'error': 'Invalid job ID'}), 400
 
-    removed = release_notification(candidate_id, job_id, channel='email')
-    if not removed:
-        return jsonify({'error': 'No reminder record found'}), 404
+    # Retry one channel at a time, so clearing a failed call does not
+    # also re-send an email the candidate already received.
+    channel = request.args.get('channel')
+    if channel not in ('email', 'call'):
+        channel = 'email'
 
-    print(f"[ADMIN] Cleared reminder for candidate={candidate_id} "
+    removed = release_notification(candidate_id, job_id, channel=channel)
+    if not removed:
+        return jsonify({'error': f'No {channel} record found'}), 404
+
+    print(f"[ADMIN] Cleared {channel} reminder for candidate={candidate_id} "
           f"job={job_id}; worker will retry if still in window")
+    noun = 'Call' if channel == 'call' else 'Reminder'
     return jsonify({
         'success': True,
-        'message': ('Reminder cleared. It will be re-sent on the next '
-                    'worker pass, if the slot is still within the '
-                    'reminder window.'),
+        'message': (f'{noun} cleared. It will be retried on the next '
+                    f'worker pass, if the slot is still within the '
+                    f'reminder window.'),
     })
 
 
