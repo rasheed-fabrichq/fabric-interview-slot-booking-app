@@ -39,12 +39,12 @@ from email_utils import send_raw_email
 # ---------------------------------------------------------------------
 
 # The CSV exported from Admin > Candidates > Export Non-Booked.
-CSV_PATH = os.path.expanduser('~/Downloads/candidates_pending_clicked (1).csv')
+CSV_PATH = os.path.expanduser('~/Downloads/candidates_all_jobs_pending_clicked.csv')
 
 # False = dry run, nothing is sent. Set to True to actually send.
 SEND = False
 
-SUBJECT = 'Reminder: Book Your KOSMIC Round 1 AI Interaction Slot'
+SUBJECT = 'Reminder: Book Your Kearney Summer Internship Round 1 AI Interaction Slot'
 
 # Redirect every email to this address instead of the candidate, for a
 # live test. Set to None for the real run.
@@ -69,7 +69,7 @@ ONLY_EMAILS = []
 # Copied on every email. Visible to the candidate in the Cc header, so
 # each of the 119 recipients sees these addresses -- and each of these
 # addresses receives one copy per candidate. Set to [] for no CC.
-CC_EMAILS = ['support@fabrichq.ai', 'abdul.rasheed@fabrichq.ai']
+CC_EMAILS = ['support@fabrichq.ai', 'rashid@fabrichq.ai']
 
 # Seconds to wait between sends, to stay under the SES rate limit.
 DELAY_SECONDS = 0.5
@@ -81,14 +81,21 @@ SENT_LOG = 'followup_sent.log'
 # ---------------------------------------------------------------------
 
 
+# The email body. Switch this to email_templates/kosmic_followup.html to
+# send the older KOSMIC invitation instead.
 TEMPLATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    'email_templates', 'kosmic_followup.html')
+    'email_templates', 'kearney_summer_intern_followup.html')
 
 PREVIEW_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'followup_preview.html')
 
 REQUIRED_COLUMNS = ('Name', 'Email', 'Candidate ID', 'Slot Booking Link')
+
+# Where the booking links point. This deployment is schedule.fabrichq.ai;
+# the older KOSMIC app is slot-booking.fabrichq.ai. Used only when the CSV
+# has no Slot Booking Link column and the link must be built from the ids.
+BOOKING_HOST = 'https://schedule.fabrichq.ai'
 
 # Deliberately loose -- SES is the real authority on deliverability. This
 # only catches blank cells and obvious paste damage.
@@ -100,7 +107,24 @@ def load_template():
         return f.read()
 
 
-def normalize_link(link, candidate_id):
+def parse_interview_link(link):
+    """Pull (candidate_id, job_id) out of an interview link.
+
+    Accepts both /jobs/<JOB>/?candidate_id=<CID> and the older
+    /interview/<JOB>/ form. Returns (None, None) if either id is absent,
+    so the row is skipped rather than mailed a broken booking link.
+    """
+    text = (link or '').strip()
+    if not text:
+        return None, None
+    job_match = re.search(r'/(?:jobs|interview)/([0-9a-fA-F-]+)/?', text)
+    cand_match = re.search(r'[?&]candidate_id=([^&\s]+)', text)
+    job_id = job_match.group(1).strip() if job_match else None
+    candidate_id = cand_match.group(1).strip() if cand_match else None
+    return candidate_id, job_id
+
+
+def normalize_link(link, candidate_id, job_id=None):
     """Return the https booking link for a candidate.
 
     The export builds its link from request.host_url, so a CSV pulled from
@@ -109,7 +133,10 @@ def normalize_link(link, candidate_id):
     """
     link = (link or '').strip()
     if not link:
-        return f'https://slot-booking.fabrichq.ai/book?candidate_id={candidate_id}'
+        base = f'{BOOKING_HOST}/book?candidate_id={candidate_id}'
+        # job_id is required by /book on this deployment; without it the
+        # candidate lands on an invalid-link page.
+        return f'{base}&job_id={job_id}' if job_id else base
     if link.startswith('http://'):
         link = 'https://' + link[len('http://'):]
     return link
@@ -126,12 +153,22 @@ def read_candidates(csv_path, status_filter=None):
     with open(csv_path, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
 
-        missing = [c for c in REQUIRED_COLUMNS if c not in (reader.fieldnames or [])]
-        if missing:
+        fields = reader.fieldnames or []
+        missing = [c for c in REQUIRED_COLUMNS if c not in fields]
+        # The export on this deployment carries only Name, Email and
+        # Interview Link -- the candidate and job ids live inside that
+        # link, so they are parsed out below instead of being required
+        # as their own columns.
+        has_interview_link = 'Interview Link' in fields
+        if missing and not (has_interview_link
+                            and 'Name' in fields and 'Email' in fields):
             raise SystemExit(
                 f"ERROR: {csv_path} is missing required column(s): {', '.join(missing)}\n"
-                f"Found: {', '.join(reader.fieldnames or [])}\n"
-                f"Expected the export from Admin > Candidates > Export Non-Booked.")
+                f"Found: {', '.join(fields)}\n"
+                f"Expected either:\n"
+                f"  Name, Email, Interview Link\n"
+                f"  Name, Email, Candidate ID, Status, Slot Booking Link\n"
+                f"from Admin > Candidates > Export Non-Booked.")
 
         seen_emails = set()
 
@@ -140,6 +177,12 @@ def read_candidates(csv_path, status_filter=None):
             email = (row.get('Email') or '').strip()
             candidate_id = (row.get('Candidate ID') or '').strip()
             status = (row.get('Status') or '').strip().lower()
+
+            # Fall back to the interview link for the ids.
+            job_id = None
+            if not candidate_id:
+                candidate_id, job_id = parse_interview_link(
+                    row.get('Interview Link'))
 
             if not name or not email or not candidate_id:
                 skipped.append((row_num, email or '(no email)', 'missing name, email or candidate id'))
@@ -165,7 +208,8 @@ def read_candidates(csv_path, status_filter=None):
                 'email': email,
                 'candidate_id': candidate_id,
                 'status': status,
-                'link': normalize_link(row.get('Slot Booking Link'), candidate_id),
+                'link': normalize_link(row.get('Slot Booking Link'),
+                                       candidate_id, job_id),
                 'row': row_num,
             })
 
