@@ -16,7 +16,7 @@ Recognised keys:
     assistant_id           the assistant the calling system should run
     agent_type             e.g. 'integrity_reminder'
     agent_name             the voice agent's name, e.g. 'Riya'
-    company_name           the client, e.g. 'Kearney'
+    company_name           the client, e.g. 'Meesho'
     role_name              spoken role; defaults to the job's name
     disqualification_rate  spoken, e.g. 'eighty percent'
     lead_minutes           minutes before the slot to call
@@ -45,25 +45,17 @@ logger = logging.getLogger(__name__)
 #     '62566b89-8826-4140-8427-5413e4fa3ec7': {
 #         'assistant_id': '651dd10a-dac9-4166-8a4c-af7bde973170',
 #         'agent_name': 'Meera',
-#         'company_name': 'Kearney India',
-#         'role_name': 'Data Science Intern',
+#         'company_name': 'Meesho',
+#         'role_name': 'HR Intern',
 #         'disqualification_rate': 'sixty percent',
 #         'lead_minutes': 45,
 #     },
 #
 JOB_CALL_CONFIGS = {
-    # Summer intern - Senior Operations Analyst (Kearney)
-    #
-    # role_name exists because the agent reads it aloud: the job's own
-    # name is "Summer intern - Senior Operations Analyst", and the
-    # hyphen does not survive text-to-speech well.
-    'ea85d314-1bb4-4bba-8702-d983915c6da6': {
-        'agent_name': 'Riya',
-        # Spelled "Karney" deliberately: it is read aloud, and this
-        # spelling gives the pronunciation the client wants.
-        'company_name': 'Karney',
-        'role_name': 'Senior Operations Analyst',
-    },
+    # Empty: every job inherits the Meesho defaults from .env. Add an
+    # entry here only for a job that needs to differ -- most usefully
+    # role_name, which the agent reads aloud and so wants a spoken form
+    # rather than the job's written name.
 }
 
 

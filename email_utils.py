@@ -22,7 +22,7 @@ def _cfg(key, default=''):
 # substitutions in send_booking_confirmation below.
 TEMPLATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    'email_templates', 'kearney_slot_confirmed.html')
+    'email_templates', 'meesho_slot_confirmed.html')
 
 # The shortly-before-your-slot reminder, sent by reminder_worker.py.
 REMINDER_TEMPLATE_PATH = os.path.join(
@@ -45,6 +45,18 @@ FAQ_DOCUMENT_LINK = os.environ.get(
 
 CONFIRMATION_EMAIL_TEMPLATE = _load_template()
 REMINDER_EMAIL_TEMPLATE = _load_template(REMINDER_TEMPLATE_PATH)
+
+
+def _confirmation_cc():
+    """Addresses copied on every booking confirmation.
+
+    Comma-separated in EMAIL_CONFIRMATION_CC. Read at call time rather
+    than at import, so the list can change without a code edit. These
+    are visible to the candidate in the Cc header, and each address
+    receives one copy per booking -- keep it to the client's panel.
+    """
+    raw = _cfg('EMAIL_CONFIRMATION_CC', '')
+    return [addr.strip() for addr in raw.split(',') if addr.strip()]
 
 
 def _render(template, substitutions):
@@ -174,8 +186,8 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
     effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
     reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
     duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
-    subject = (f"Your AI Interview Assessment is Confirmed – "
-               f"{slot_date} {start_time} IST")
+    subject = (f"{effective_company} Campus Hiring: Your AI Interview Link "
+               f"for {job_name} Role")
 
     html_content, error = _render(CONFIRMATION_EMAIL_TEMPLATE, (
         ('{{Candidate Name}}', candidate_name),
@@ -199,6 +211,7 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
         html_content=html_content,
         reply_to=[reply_to_addr],
         company_name=effective_company,
+        cc=_confirmation_cc(),
     )
 
 

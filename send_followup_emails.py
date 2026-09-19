@@ -329,7 +329,7 @@ def main():
             subject=SUBJECT,
             html_content=html,
             reply_to=[os.environ.get('EMAIL_REPLY_TO', 'support@fabrichq.ai')],
-            company_name=os.environ.get('EMAIL_COMPANY_NAME', 'Kearney'),
+            company_name=os.environ.get('EMAIL_COMPANY_NAME', 'Meesho'),
             cc=CC_EMAILS,
         )
 

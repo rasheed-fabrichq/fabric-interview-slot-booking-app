@@ -1259,7 +1259,7 @@ def admin_call_config():
         'agent_type': os.environ.get('CALLER_AGENT_TYPE',
                                      'integrity_reminder'),
         'agent_name': os.environ.get('CALLER_AGENT_NAME', 'Riya'),
-        'company_name': os.environ.get('CALLER_COMPANY_NAME', 'Kearney'),
+        'company_name': os.environ.get('CALLER_COMPANY_NAME', 'Meesho'),
         'disqualification_rate': os.environ.get(
             'CALL_DISQUALIFICATION_RATE', 'eighty percent'),
         'lead_minutes': os.environ.get('CALL_LEAD_MINUTES', '30'),
