@@ -27,7 +27,7 @@ TEMPLATE_PATH = os.path.join(
 # The shortly-before-your-slot reminder, sent by reminder_worker.py.
 REMINDER_TEMPLATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    'email_templates', 'kearney_slot_reminder.html')
+    'email_templates', 'meesho_slot_reminder.html')
 
 
 def _load_template(path=None):
@@ -230,8 +230,11 @@ def send_slot_reminder(candidate_name, candidate_email, job_name,
     effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
     reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
     duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
-    subject = (f"Starting soon: your AI interview at {start_time} IST "
-               f"({slot_date})")
+    # The slot time stays in the subject: the instructions-only body no
+    # longer repeats it, so this is the candidate's only reminder of
+    # when they are due.
+    subject = (f"Reminder - {effective_company} AI Round 1 Interview at {start_time} IST "
+               f"({slot_date}) – Important Instructions")
 
     html_content, error = _render(REMINDER_EMAIL_TEMPLATE, (
         ('{{Candidate Name}}', candidate_name),
