@@ -38,6 +38,8 @@ from database import (
     get_job_communication, update_job_communication,
     save_job_email_template, delete_job_email_template,
     copy_job_communication, EMAIL_TEMPLATE_KINDS,
+    create_batch, link_id_exists, find_candidate_by_link,
+    find_candidate_other_batch,
 )
 from job_call_settings import update_job_call_config, get_job_call_config
 from caller_utils import get_recording_url
@@ -196,9 +198,11 @@ def extract_candidate_id_and_job_from_url(interview_link):
       Interview link:   <domain>/interviews/<ASSISTANT_UUID>/?candidate_id=<CANDIDATE_UUID>
                         (singular /interview/ also accepted)
 
-    The UUID in the path is returned as job_id either way. For interview
-    links that means the job must be created with the assistant ID as its
-    Job ID -- the same setup used for the original /interview/ links.
+    The UUID in the path is returned as job_id either way, and must be
+    some job's link ID. For interview links that means the job must be
+    created with the assistant ID as its Job ID -- the same setup used
+    for the original /interview/ links. Batches share their parent's
+    link ID, so one link format serves every batch.
     Returns: (candidate_id, job_id, error_message) tuple
     """
     if not interview_link or pd.isna(interview_link):
@@ -224,8 +228,8 @@ def extract_candidate_id_and_job_from_url(interview_link):
         if not is_valid_uuid(job_id):
             return None, None, f"ID '{job_id}' in the link is not a valid UUID"
 
-        # Validate job_id exists in our system
-        if not is_valid_job_id(job_id):
+        # Validate a job is addressed by this ID
+        if not link_id_exists(job_id):
             return None, None, (f"No job has ID '{job_id}'. For interview "
                                 f"links, create the job with the assistant "
                                 f"ID from the link as its Job ID")
@@ -300,23 +304,27 @@ def booking_form():
         return render_template('invalid_link.html',
                              message='Missing job ID in the link.')
 
-    # Validate job_id
-    if not is_valid_job_id(job_id):
+    # Validate job_id: a job's link ID, or a batch's own ID
+    if not link_id_exists(job_id) and not is_valid_job_id(job_id):
         return render_template('invalid_link.html',
                              message='Invalid job ID in the link.')
+
+    # The link's job_id is the job's link ID, shared by all its batches.
+    # The candidate's row says which batch they are in; from here on
+    # job_id is that batch. A job without batches resolves to itself.
+    candidate = find_candidate_by_link(candidate_id, job_id)
+
+    if not candidate:
+        return render_template('invalid_link.html',
+                             message='Invalid booking link. Please check your email for the correct link.')
+
+    job_id = candidate['job_id']
 
     # Check if booking is enabled for this specific job
     if not is_booking_enabled_for_job(job_id):
         return render_template('booking_closed.html',
                              message=f'Booking for {get_job_name(job_id)} is currently closed.',
                              branding=get_job_branding(job_id))
-
-    # Get candidate details
-    candidate = get_candidate(candidate_id, job_id)
-
-    if not candidate:
-        return render_template('invalid_link.html',
-                             message='Invalid booking link. Please check your email for the correct link.')
 
     # Check if already booked for THIS JOB
     if candidate['status'] == 'booked':
@@ -552,6 +560,10 @@ def admin_upload():
                                  error='Please select a valid job',
                                  jobs=get_jobs())
 
+        # Links carry the job's link ID, which for a batch is its
+        # parent's ID rather than the batch's own.
+        selected_link_id = get_job_config(job_id)['link_id']
+
         if 'file' not in request.files:
             return render_template('admin_upload.html',
                                  error='No file uploaded',
@@ -661,10 +673,20 @@ def admin_upload():
                         errors.append(f"Row {row_num}: {link_error} | Row data: {row_display}")
                         continue
 
-                    # Validation 3: Verify job_id matches selected job
-                    if extracted_job_id != job_id:
+                    # Validation 3: the link's ID must be the selected
+                    # job's link ID (for a batch, its parent's ID)
+                    if extracted_job_id != selected_link_id:
                         error_count += 1
-                        errors.append(f"Row {row_num}: ID mismatch - link has '{extracted_job_id}' but the selected job's ID is '{job_id}' | Row data: {row_display}")
+                        errors.append(f"Row {row_num}: ID mismatch - link has '{extracted_job_id}' but the selected job's link ID is '{selected_link_id}' | Row data: {row_display}")
+                        continue
+
+                    # Validation 3b: one batch per candidate, so their
+                    # booking link resolves to exactly one batch
+                    other_batch = find_candidate_other_batch(
+                        extracted_candidate_id, selected_link_id, job_id)
+                    if other_batch:
+                        error_count += 1
+                        errors.append(f"Row {row_num}: candidate is already in batch '{other_batch}' of this job; a candidate can be in only one batch | Row data: {row_display}")
                         continue
 
                     # Validation 4: Validate UUID
@@ -1000,7 +1022,8 @@ def admin_export():
             'Name': booking['name'],
             'Email': booking['email'],
             'Job': booking['job_name'],
-            'Job ID': booking['job_id'],
+            # The ID in candidates' links; the batch shows under 'Job'.
+            'Job ID': booking['link_id'],
             'Date': booking['date'],
             'Day': booking['day_of_week'],
             'Start Time': start_datetime.strftime("%d-%m-%Y %H:%M"),
@@ -1146,7 +1169,8 @@ def admin_release_booking(candidate_id, job_id):
           f"job={job_id} ({result['freed_date']} {result['freed_time']})")
 
     booking_link = (f"{request.host_url.rstrip('/')}/book"
-                    f"?candidate_id={candidate_id}&job_id={job_id}")
+                    f"?candidate_id={candidate_id}"
+                    f"&job_id={get_job_config(job_id)['link_id']}")
     return jsonify({
         'success': True,
         'message': (f"Booking released. {result['freed_date']} "
@@ -1620,7 +1644,28 @@ def admin_slots():
 @app.route('/admin/jobs', methods=['GET', 'POST'])
 @admin_required
 def admin_jobs():
-    """Manage jobs - create new jobs"""
+    """Manage jobs - create new jobs and batches of existing ones"""
+    def render(**kwargs):
+        return render_template('admin_jobs.html', jobs=get_jobs(),
+                               configs=get_all_job_configs(), **kwargs)
+
+    if request.method == 'POST' and request.form.get('action') == 'add_batch':
+        parent_id = request.form.get('parent_job_id')
+        batch_name = (request.form.get('batch_name') or '').strip()
+        if not is_valid_job_id(parent_id):
+            return render(error='Choose a valid job to add a batch to')
+        if not batch_name:
+            return render(error='Batch name is required')
+        if batch_name in get_jobs().values():
+            return render(error=f'A job named "{batch_name}" already exists')
+
+        result = create_batch(parent_id, batch_name)
+        if 'error' in result:
+            return render(error=result['error'])
+        return render(success=(f'Batch "{batch_name}" created. Add its '
+                               f'interview dates, initialize its slots, then '
+                               f'upload its candidates.'))
+
     if request.method == 'POST':
         job_id = request.form.get('job_id')
         job_name = request.form.get('job_name')
@@ -1630,18 +1675,14 @@ def admin_jobs():
         capacity = request.form.get('capacity', '15')
 
         if not all([job_id, job_name]):
-            return render_template('admin_jobs.html',
-                                 error='Job ID and Job Name are required',
-                                 jobs=get_jobs())
+            return render(error='Job ID and Job Name are required')
 
         # Validate UUID format
         try:
             from uuid import UUID
             UUID(str(job_id).strip(), version=4)
         except (ValueError, AttributeError):
-            return render_template('admin_jobs.html',
-                                 error='Job ID must be a valid UUID (e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6)',
-                                 jobs=get_jobs())
+            return render(error='Job ID must be a valid UUID (e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6)')
 
         try:
             duration_int = int(duration)
@@ -1653,20 +1694,14 @@ def admin_jobs():
             result = create_job(job_id.strip(), job_name.strip(), start_time, end_time, duration_int, capacity_int)
 
             if 'error' in result:
-                return render_template('admin_jobs.html',
-                                     error=result['error'],
-                                     jobs=get_jobs())
+                return render(error=result['error'])
 
-            return render_template('admin_jobs.html',
-                                 success=f'Job "{job_name}" created successfully!',
-                                 jobs=get_jobs())
+            return render(success=f'Job "{job_name}" created successfully!')
 
         except ValueError as e:
-            return render_template('admin_jobs.html',
-                                 error=f'Invalid input: {str(e)}',
-                                 jobs=get_jobs())
+            return render(error=f'Invalid input: {str(e)}')
 
-    return render_template('admin_jobs.html', jobs=get_jobs())
+    return render()
 
 
 # Error handlers

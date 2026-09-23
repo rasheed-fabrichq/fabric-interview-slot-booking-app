@@ -80,6 +80,12 @@ https://slot-booking.fabrichq.ai/book?candidate_id=<CANDIDATE_UUID>&job_id=<JOB_
 - Blank fields fall back to `.env` values. Templates and settings are read at send time, so edits apply without restarting the app or `reminder_worker.py`.
 - "Copy from another job" clones all of the above between jobs.
 
+### 9. Batches (different slots for different candidates of one job)
+- Admin > Jobs > **Add batch** creates a new `job_configs` row with a generated `job_id`, the parent's `link_id`, and `parent_job_id` set. It copies slot settings, communications and templates, but not dates.
+- `link_id` is the ID in candidates' links (`/jobs/<ID>/`, `/interviews/<ID>/`) and in the booking link. A normal job has `link_id == job_id`.
+- Upload checks the link's ID against the selected job's `link_id`, and rejects a candidate who is already in another batch with the same `link_id`.
+- `/book?candidate_id=&job_id=<link_id>` is unchanged. `find_candidate_by_link` routes the candidate to the batch they were uploaded into. After that, everything (dates, slots, capacity, emails, reminders) uses the batch's own `job_id`.
+
 ## Technical Architecture
 
 ### Tech Stack

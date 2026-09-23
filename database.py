@@ -46,6 +46,14 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id TEXT UNIQUE NOT NULL,
             job_name TEXT NOT NULL,
+
+            -- The ID in candidates' links (/jobs/<ID>/ or /interviews/<ID>/)
+            -- and in the booking link's job_id. Equal to job_id for a
+            -- normal job; a batch shares its parent's link_id and has a
+            -- generated job_id of its own.
+            link_id TEXT NOT NULL,
+            parent_job_id TEXT,                 -- set on batches only
+
             slot_start_time TEXT NOT NULL,
             slot_end_time TEXT NOT NULL,
             slot_duration_minutes INTEGER NOT NULL,
@@ -78,6 +86,11 @@ def init_database():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_job_configs_link
+        ON job_configs(link_id)
     ''')
 
     # Per-job email templates, one row per job per kind. A job with no
@@ -351,18 +364,115 @@ def create_job(job_id, job_name, start_time='08:00', end_time='00:00', duration=
     cursor = conn.cursor()
 
     try:
+        # Only a batch's link_id differs from its job_id; a job created
+        # here is addressed in links by its own ID.
         cursor.execute('''
             INSERT INTO job_configs
-            (job_id, job_name, slot_start_time, slot_end_time,
+            (job_id, job_name, link_id, slot_start_time, slot_end_time,
              slot_duration_minutes, capacity_per_slot, booking_enabled)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-        ''', (job_id, job_name, start_time, end_time, duration, capacity))
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+        ''', (job_id, job_name, job_id, start_time, end_time, duration,
+              capacity))
         conn.commit()
         conn.close()
         return {'success': True}
     except sqlite3.IntegrityError:
         conn.close()
         return {'error': 'Job with this ID already exists'}
+
+
+def create_batch(parent_job_id, batch_name):
+    """Create a batch of an existing job.
+
+    A batch is a job of its own -- its own dates, slots, capacity and
+    candidates -- that shares the parent's link_id, so candidates of
+    every batch arrive with the same /book?job_id=<link_id> link and are
+    routed to their batch by which one they were uploaded into.
+
+    Copies the parent's slot settings, communication settings and email
+    templates. Dates are not copied: different dates are the usual
+    reason for a batch.
+
+    Returns {'success': True, 'job_id': ...} or {'error': ...}.
+    """
+    import uuid
+
+    parent = get_job_config(parent_job_id)
+    if not parent:
+        return {'error': 'Parent job not found'}
+
+    # Batches of a batch hang off the original job, so every batch in a
+    # group points at the same parent.
+    root_job_id = parent['parent_job_id'] or parent['job_id']
+    new_job_id = str(uuid.uuid4())
+
+    copied = ('slot_start_time', 'slot_end_time', 'slot_duration_minutes',
+              'capacity_per_slot') + COMMUNICATION_FIELDS
+    columns = ('job_id', 'job_name', 'link_id', 'parent_job_id',
+               'booking_enabled') + copied
+    values = (new_job_id, batch_name, parent['link_id'], root_job_id, 1,
+              *(parent[c] for c in copied))
+
+    with get_db_transaction() as conn:
+        conn.execute(
+            f'INSERT INTO job_configs ({", ".join(columns)}) '
+            f'VALUES ({", ".join("?" for _ in columns)})', values)
+        conn.execute('''
+            INSERT INTO job_email_templates (job_id, kind, subject, body, updated_at)
+            SELECT ?, kind, subject, body, ?
+            FROM job_email_templates WHERE job_id = ?
+        ''', (new_job_id, datetime.now(), parent_job_id))
+
+    return {'success': True, 'job_id': new_job_id}
+
+
+def link_id_exists(link_id):
+    """Whether any job is addressed by this link ID."""
+    conn = get_db_connection()
+    row = conn.execute('SELECT 1 FROM job_configs WHERE link_id = ? LIMIT 1',
+                       (link_id,)).fetchone()
+    conn.close()
+    return row is not None
+
+
+def find_candidate_by_link(candidate_id, link_id):
+    """Resolve a booking link to the candidate's own batch.
+
+    Looks for the candidate in every job sharing link_id. A job without
+    batches has link_id equal to its job_id, so this finds the same row
+    get_candidate would. Upload keeps a candidate in at most one batch
+    per link_id, so there is at most one match.
+
+    A batch's internal job_id is accepted too, so a link built with it
+    still works.
+    """
+    conn = get_db_connection()
+    row = conn.execute('''
+        SELECT c.* FROM candidates c
+        JOIN job_configs jc ON c.job_id = jc.job_id
+        WHERE c.candidate_id = ? AND (jc.link_id = ? OR jc.job_id = ?)
+        ORDER BY jc.link_id = ? DESC
+        LIMIT 1
+    ''', (candidate_id, link_id, link_id, link_id)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def find_candidate_other_batch(candidate_id, link_id, job_id):
+    """Name of another job with this link_id the candidate is already in.
+
+    Used on upload: a candidate in two batches of the same job would
+    have one booking link that could mean either, so it is refused.
+    """
+    conn = get_db_connection()
+    row = conn.execute('''
+        SELECT jc.job_name FROM candidates c
+        JOIN job_configs jc ON c.job_id = jc.job_id
+        WHERE c.candidate_id = ? AND jc.link_id = ? AND c.job_id != ?
+        LIMIT 1
+    ''', (candidate_id, link_id, job_id)).fetchone()
+    conn.close()
+    return row['job_name'] if row else None
 
 
 def get_job_config(job_id):
@@ -754,7 +864,8 @@ def get_all_candidates(job_id=None):
                 c.status,
                 c.created_at,
                 c.updated_at,
-                jc.job_name
+                jc.job_name,
+                jc.link_id
             FROM candidates c
             LEFT JOIN job_configs jc ON c.job_id = jc.job_id
             WHERE c.job_id = ?
@@ -772,7 +883,8 @@ def get_all_candidates(job_id=None):
                 c.status,
                 c.created_at,
                 c.updated_at,
-                jc.job_name
+                jc.job_name,
+                jc.link_id
             FROM candidates c
             LEFT JOIN job_configs jc ON c.job_id = jc.job_id
             ORDER BY c.created_at DESC
@@ -1139,6 +1251,7 @@ def get_all_bookings(job_id=None):
                 c.interview_link,
                 jc.job_name,
                 b.job_id,
+                jc.link_id,
                 s.date,
                 s.day_of_week,
                 s.start_time,
@@ -1163,6 +1276,7 @@ def get_all_bookings(job_id=None):
                 c.interview_link,
                 jc.job_name,
                 b.job_id,
+                jc.link_id,
                 s.date,
                 s.day_of_week,
                 s.start_time,

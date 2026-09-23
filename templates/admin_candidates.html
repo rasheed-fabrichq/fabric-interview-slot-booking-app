@@ -92,7 +92,7 @@
                         {# The link the candidate uses to pick a slot. #}
                         {% set booking_link = request.host_url.rstrip('/')
                             ~ '/book?candidate_id=' ~ candidate.candidate_id
-                            ~ '&job_id=' ~ candidate.job_id %}
+                            ~ '&job_id=' ~ (candidate.link_id or candidate.job_id) %}
                         <div class="d-flex gap-1">
                             <a href="{{ booking_link }}" target="_blank"
                                class="btn btn-sm btn-outline-success text-nowrap"
