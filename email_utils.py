@@ -22,7 +22,7 @@ def _cfg(key, default=''):
 # substitutions in send_booking_confirmation below.
 TEMPLATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    'email_templates', 'meesho_slot_confirmed.html')
+    'email_templates', 'aays_slot_confirmed.html')
 
 # The shortly-before-your-slot reminder, sent by reminder_worker.py.
 REMINDER_TEMPLATE_PATH = os.path.join(
