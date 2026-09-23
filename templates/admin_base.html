@@ -1,0 +1,101 @@
+{#
+  Admin app shell. Every admin page extends this template.
+
+  Blocks to fill in a page:
+    page_title     Short page name, shown in the top bar and the <title>.  (required)
+    page_subtitle  One-line description under the top bar.                 (optional)
+    page_actions   Buttons aligned right of the subtitle row.              (optional)
+    admin_content  The page body.                                          (required)
+    extra_css / extra_js   Inherited from base.html for page-specific assets/scripts.
+
+  Components available (see the comment block at the top of static/css/style.css):
+    .stat-card, .status-pill, .table-card/.table-modern, .filter-bar, .callout,
+    .card-title-icon, .form-section, .empty-state, .section-title ...
+#}
+{% extends "base.html" %}
+
+{% block title %}{{ self.page_title()|striptags|trim }} · Admin{% endblock %}
+{% block body_class %}admin-body{% endblock %}
+
+{% block body %}
+{% macro nav_link(endpoint, icon, label, also=()) -%}
+    {%- set is_active = request.endpoint == endpoint or request.endpoint in also -%}
+    <a class="sidebar-link{% if is_active %} active{% endif %}" href="{{ url_for(endpoint) }}"{% if is_active %} aria-current="page"{% endif %}>
+        <i class="bi {{ icon }}"></i><span>{{ label }}</span>
+    </a>
+{%- endmacro %}
+<div class="admin-shell">
+    <!-- Sidebar: static on lg+, offcanvas drawer below lg -->
+    <aside class="admin-sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="adminSidebar" aria-labelledby="adminSidebarLabel">
+        <div class="offcanvas-header d-lg-none p-0 pe-3">
+            <a class="sidebar-brand" href="{{ url_for('admin_dashboard') }}" id="adminSidebarLabel">
+                <span class="brand-mark"><i class="bi bi-calendar2-check"></i></span>
+                <span class="brand-text">Slot Booking<small>FabricHQ Admin</small></span>
+            </a>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" data-bs-target="#adminSidebar" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            <a class="sidebar-brand d-none d-lg-flex" href="{{ url_for('admin_dashboard') }}">
+                <span class="brand-mark"><i class="bi bi-calendar2-check"></i></span>
+                <span class="brand-text">Slot Booking<small>FabricHQ Admin</small></span>
+            </a>
+            <nav class="sidebar-nav" aria-label="Admin navigation">
+                <div class="sidebar-group-label">Overview</div>
+                {{ nav_link('admin_dashboard', 'bi-grid-1x2', 'Dashboard') }}
+
+                <div class="sidebar-group-label">Setup</div>
+                {{ nav_link('admin_jobs', 'bi-briefcase', 'Jobs') }}
+                {{ nav_link('admin_job_config', 'bi-sliders', 'Job Configuration') }}
+                {{ nav_link('admin_job_dates', 'bi-calendar-week', 'Interview Dates') }}
+                {{ nav_link('admin_init_slots', 'bi-clock', 'Initialize Slots', ('admin_slots',)) }}
+                {{ nav_link('admin_communications', 'bi-megaphone', 'Communications', ('admin_call_config',)) }}
+
+                <div class="sidebar-group-label">Candidates</div>
+                {{ nav_link('admin_upload', 'bi-cloud-arrow-up', 'Upload') }}
+                {{ nav_link('admin_candidates', 'bi-people', 'Candidates') }}
+                {{ nav_link('admin_bookings', 'bi-calendar-check', 'Bookings') }}
+
+                <div class="sidebar-group-label">Reminders</div>
+                {{ nav_link('admin_notifications', 'bi-bell', 'Notification Log') }}
+                {{ nav_link('admin_calls', 'bi-telephone', 'Call Log') }}
+            </nav>
+            <div class="sidebar-footer">
+                <a class="sidebar-link" href="{{ url_for('admin_logout') }}">
+                    <i class="bi bi-box-arrow-left"></i><span>Logout</span>
+                </a>
+            </div>
+        </div>
+    </aside>
+
+    <div class="admin-main">
+        <header class="admin-topbar">
+            <button class="topbar-toggle d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#adminSidebar" aria-controls="adminSidebar" aria-label="Open navigation">
+                <i class="bi bi-list"></i>
+            </button>
+            <h1 class="page-title">{% block page_title %}Admin{% endblock %}</h1>
+            <div class="topbar-right">
+                <span class="topbar-user d-none d-md-inline-flex">
+                    <span class="topbar-avatar">A</span>Admin
+                </span>
+                <a href="{{ url_for('admin_logout') }}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-box-arrow-right"></i><span class="d-none d-sm-inline">Logout</span>
+                </a>
+            </div>
+        </header>
+
+        <main class="admin-content">
+            {% set _subtitle = self.page_subtitle()|trim %}
+            {% set _actions = self.page_actions()|trim %}
+            {% if _subtitle or _actions %}
+            <div class="page-header">
+                <div>{% if _subtitle %}<p class="page-subtitle">{% block page_subtitle %}{% endblock %}</p>{% endif %}</div>
+                {% if _actions %}<div class="page-actions">{% block page_actions %}{% endblock %}</div>{% endif %}
+            </div>
+            {% endif %}
+
+            {% block admin_content %}{% endblock %}
+        </main>
+        <footer class="admin-footer">FabricHQ · AI Discussion Slot Booking</footer>
+    </div>
+</div>
+{% endblock %}

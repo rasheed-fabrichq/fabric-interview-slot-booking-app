@@ -71,6 +71,15 @@ https://slot-booking.fabrichq.ai/book?candidate_id=<CANDIDATE_UUID>&job_id=<JOB_
 - Each record = one confirmed booking with job information
 - Interview link includes start/end time parameters when exporting
 
+### 8. Per-Job Communications (multi-client)
+- Everything a candidate receives is configured per job at **Admin > Communications** (`/admin/communications?job_id=&tab=branding|confirmation|reminder|call`), so one deployment serves several clients at once.
+- **Branding** (columns on `job_configs`): `company_name` (sender "Team <company>"), `email_reply_to`, `email_cc` (confirmation only), `support_email`, `faq_link`. Also shown on candidate pages.
+- **Email templates** (`job_email_templates`, one row per `job_id` + `kind` = `confirmation|reminder`): subject + HTML body with `{{Placeholder}}` tokens (list in `email_utils.PLACEHOLDERS`). Unknown placeholders are rejected on save. No row = built-in default (`email_templates/default_slot_*.html`).
+- **Reminder email**: `reminder_email_enabled`, `reminder_lead_minutes` per job.
+- **AI call**: `call_enabled` (NULL follows `CALLS_ENABLED`), `call_lead_minutes`, `call_*` persona fields, read through `job_call_settings.py`.
+- Blank fields fall back to `.env` values. Templates and settings are read at send time, so edits apply without restarting the app or `reminder_worker.py`.
+- "Copy from another job" clones all of the above between jobs.
+
 ## Technical Architecture
 
 ### Tech Stack

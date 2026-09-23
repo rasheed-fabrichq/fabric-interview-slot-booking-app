@@ -14,11 +14,12 @@ load_dotenv()
 from datetime import datetime, timedelta
 
 from config import now_local
-from database import get_db_connection
+from database import get_db_connection, get_job_communication
 from job_call_settings import get_job_call_config
 from reminder_worker import (
     get_lead_minutes, get_grace_minutes, get_call_lead_minutes,
     calls_enabled, job_calls_enabled, job_call_lead_minutes,
+    job_email_enabled, job_email_lead_minutes,
     CHANNEL, CALL_CHANNEL, KIND,
 )
 
@@ -29,7 +30,8 @@ calls_lead_display = get_call_lead_minutes()
 calls_on_globally = calls_enabled()
 
 print(f'Now (IST):        {now.strftime("%d-%m-%Y %H:%M:%S")}')
-print(f'Reminder lead:    {lead} minutes before the slot')
+print(f'Reminder lead:    {lead} minutes before the slot '
+      f'(default; jobs can override)')
 print(f'Grace period:     {grace} minutes after the send window opens')
 # The date is included because a large lead pushes the window past
 # midnight, where a bare %H:%M reads as though it ran backwards.
@@ -103,8 +105,11 @@ for r in rows:
     delta_min = int(round((slot_dt - now).total_seconds() / 60))
     when = f'{delta_min} min' if delta_min >= 0 else f'{-delta_min} ago'
 
+    job_settings = get_job_communication(r['job_id'])
     email_state = describe(r['reminder_status'], r['reminder_error'],
-                           delta_min, lead)
+                           delta_min, job_email_lead_minutes(job_settings),
+                           enabled=job_email_enabled(job_settings),
+                           blocked_reason='reminder email off for job')
 
     # The call has its own lead time and can be switched off per job.
     job_cfg = get_job_call_config(r['job_id'])
@@ -115,7 +120,7 @@ for r in rows:
     else:
         call_state = describe(r['call_status'], r['call_error'], delta_min,
                               call_lead, enabled=call_on,
-                              blocked_reason='calls off (CALLS_ENABLED)')
+                              blocked_reason='calls off for job')
 
     name = (r['name'] or '')[:18]
     print(f'{name:20} {r["date"]} {r["start_time"]:5} {when:>9}  '

@@ -1,98 +1,97 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 
-{% block title %}Manage Job Dates - Admin{% endblock %}
+{% block page_title %}Interview Dates{% endblock %}
+{% block page_subtitle %}Add or remove AI discussion dates for each job.{% endblock %}
 
-{% block content %}
-<div class="container-fluid">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h2>Manage AI Discussion Dates</h2>
-            <p class="text-muted">Add or remove AI discussion dates for each job</p>
-        </div>
-    </div>
+{% block admin_content %}
+{% include "_admin_alerts.html" %}
+{% set months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
 
-    {% if success %}
-    <div class="alert alert-success alert-dismissible fade show">
-        {{ success }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-    {% endif %}
+<div class="row g-4">
+    {% for job_id, job_name in jobs.items() %}
+    {% set job_dates = all_dates.get(job_id, []) %}
+    <div class="col-md-6 col-xxl-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <span class="card-title-icon tone-info"><i class="bi bi-calendar-week"></i></span>
+                <div class="me-auto" style="min-width:0;"><h5 class="text-truncate">{{ job_name }}</h5></div>
+                <span class="status-pill {{ 'pill-primary' if job_dates else 'pill-neutral' }} no-dot">{{ job_dates|length }} date{{ '' if job_dates|length == 1 else 's' }}</span>
+            </div>
+            <div class="card-body">
+                <!-- Add Date Form -->
+                <form method="POST" action="{{ url_for('admin_job_dates') }}" class="mb-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="job_id" value="{{ job_id }}">
 
-    {% if error %}
-    <div class="alert alert-danger alert-dismissible fade show">
-        {{ error }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-    {% endif %}
+                    <div class="form-section-title">Add new date</div>
+                    <div class="mb-3">
+                        <label class="form-label">Date</label>
+                        <input type="date" name="date" class="form-control" required>
+                    </div>
 
-    <div class="row">
-        {% for job_id, job_name in jobs.items() %}
-        <div class="col-md-4 mb-4">
-            <div class="card shadow">
-                <div class="card-header bg-info text-white">
-                    <h5 class="mb-0">{{ job_name }}</h5>
-                </div>
-                <div class="card-body">
-                    <!-- Add Date Form -->
-                    <form method="POST" action="{{ url_for('admin_job_dates') }}" class="mb-3">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="action" value="add">
-                        <input type="hidden" name="job_id" value="{{ job_id }}">
-
-                        <div class="mb-2">
-                            <label class="form-label"><strong>Add New Date</strong></label>
-                            <input type="date" name="date" class="form-control" required>
-                        </div>
-
-                        <div class="mb-2">
-                            <label class="form-label"><strong>Custom Time Range (Optional)</strong></label>
-                            <small class="text-muted d-block mb-1">Leave empty to use job's default times</small>
-                            <div class="row">
-                                <div class="col-6">
-                                    <input type="time" name="start_time" class="form-control" placeholder="Start Time">
-                                    <small class="text-muted">Start</small>
-                                </div>
-                                <div class="col-6">
-                                    <input type="time" name="end_time" class="form-control" placeholder="End Time">
-                                    <small class="text-muted">End</small>
-                                </div>
+                    <div class="mb-3">
+                        <label class="form-label mb-0">Custom Time Range <span class="text-muted fw-normal">(Optional)</span></label>
+                        <span class="form-hint mt-0 mb-2">Leave empty to use job's default times</span>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <input type="time" name="start_time" class="form-control" placeholder="Start Time" aria-label="Start time">
+                                <span class="form-hint">Start</span>
+                            </div>
+                            <div class="col-6">
+                                <input type="time" name="end_time" class="form-control" placeholder="End Time" aria-label="End time">
+                                <span class="form-hint">End</span>
                             </div>
                         </div>
+                    </div>
 
-                        <button type="submit" class="btn btn-success btn-sm w-100">
-                            <i class="bi bi-plus-circle"></i> Add Date
-                        </button>
-                    </form>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-plus-circle"></i> Add Date
+                    </button>
+                </form>
 
-                    <hr>
-
-                    <!-- Current Dates -->
-                    <h6 class="mb-3">Current Dates:</h6>
-                    {% set job_dates = all_dates.get(job_id, []) %}
-                    {% if job_dates %}
-                    <div class="list-group">
-                        {% for date_info in job_dates %}
-                        <div class="list-group-item">
-                            <div class="d-flex justify-content-between align-items-start mb-2">
+                <!-- Current Dates -->
+                <div class="form-section-title">Current dates</div>
+                {% if job_dates %}
+                <div>
+                    {% for date_info in job_dates %}
+                    {% set parts = date_info.date.split('-') %}
+                    <div class="date-row">
+                        <div class="date-badge">
+                            {% if parts|length == 3 and parts[1]|int >= 1 and parts[1]|int <= 12 %}
+                            <span class="d">{{ parts[0] }}</span><span class="m">{{ months[parts[1]|int - 1] }}</span>
+                            {% else %}
+                            <i class="bi bi-calendar"></i>
+                            {% endif %}
+                        </div>
+                        <div class="flex-grow-1" style="min-width:0;">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
                                 <div>
-                                    <strong>{{ date_info.day_of_week }}</strong><br>
-                                    <small class="text-muted">{{ date_info.date }}</small>
-                                    {% if date_info.slot_start_time and date_info.slot_end_time %}
-                                    <br><span class="badge bg-primary">{{ date_info.slot_start_time }} - {{ date_info.slot_end_time }}</span>
-                                    {% else %}
-                                    <br><span class="badge bg-secondary">Default times</span>
-                                    {% endif %}
+                                    <div class="fw-semibold">{{ date_info.day_of_week }}</div>
+                                    <div class="small text-muted">{{ date_info.date }}</div>
                                 </div>
                                 <form method="POST" action="{{ url_for('admin_job_dates') }}" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="job_id" value="{{ job_id }}">
                                     <input type="hidden" name="date" value="{{ date_info.date }}">
-                                    <button type="submit" class="btn btn-danger btn-sm"
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete date"
                                             onclick="return confirm('Delete this date? This will also delete all slots for this date.')">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </form>
+                            </div>
+                            <div class="d-flex align-items-center justify-content-between gap-2 mt-2">
+                                {% if date_info.slot_start_time and date_info.slot_end_time %}
+                                <span class="status-pill pill-primary no-dot"><i class="bi bi-clock"></i>{{ date_info.slot_start_time }} - {{ date_info.slot_end_time }}</span>
+                                {% else %}
+                                <span class="status-pill pill-neutral no-dot">Default times</span>
+                                {% endif %}
+                                <button class="btn btn-link btn-sm p-0 text-decoration-none" type="button"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#editTimes{{ loop.index }}{{ job_id|replace('-', '') }}">
+                                    <i class="bi bi-pencil"></i> Edit Times
+                                </button>
                             </div>
 
                             <!-- Edit times form (collapsible) -->
@@ -102,63 +101,44 @@
                                     <input type="hidden" name="action" value="update_times">
                                     <input type="hidden" name="job_id" value="{{ job_id }}">
                                     <input type="hidden" name="date" value="{{ date_info.date }}">
-                                    <div class="row g-2">
-                                        <div class="col-5">
-                                            <input type="time" name="start_time" class="form-control form-control-sm"
-                                                   value="{{ date_info.slot_start_time }}" required>
-                                        </div>
-                                        <div class="col-5">
-                                            <input type="time" name="end_time" class="form-control form-control-sm"
-                                                   value="{{ date_info.slot_end_time }}" required>
-                                        </div>
-                                        <div class="col-2">
-                                            <button type="submit" class="btn btn-primary btn-sm">
-                                                <i class="bi bi-check"></i>
-                                            </button>
-                                        </div>
+                                    <div class="d-flex gap-2">
+                                        <input type="time" name="start_time" class="form-control form-control-sm"
+                                               value="{{ date_info.slot_start_time }}" required aria-label="Start time">
+                                        <input type="time" name="end_time" class="form-control form-control-sm"
+                                               value="{{ date_info.slot_end_time }}" required aria-label="End time">
+                                        <button type="submit" class="btn btn-primary btn-sm" title="Save times">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
                                     </div>
                                 </form>
                             </div>
-                            <button class="btn btn-outline-secondary btn-sm mt-2 w-100" type="button"
-                                    data-bs-toggle="collapse"
-                                    data-bs-target="#editTimes{{ loop.index }}{{ job_id|replace('-', '') }}">
-                                <i class="bi bi-clock"></i> Edit Times
-                            </button>
                         </div>
-                        {% endfor %}
                     </div>
-                    {% else %}
-                    <div class="alert alert-warning small">
-                        No dates configured yet.
-                    </div>
-                    {% endif %}
+                    {% endfor %}
                 </div>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-
-    <div class="row mt-4">
-        <div class="col-12">
-            <div class="alert alert-info">
-                <strong>💡 Tips:</strong>
-                <ul class="mb-0">
-                    <li>Add AI discussion dates before initializing slots</li>
-                    <li>Optionally set custom time ranges for specific dates (e.g., 20:00-00:00 for evening slots, 08:00-00:00 for all-day)</li>
-                    <li>Dates without custom times will use the job's default time range</li>
-                    <li>Deleting a date will also delete all associated slots and bookings</li>
-                    <li>After adding/updating times, remember to clear and re-initialize slots</li>
-                </ul>
+                {% else %}
+                <div class="callout callout-warning">
+                    <i class="bi bi-calendar-x"></i>
+                    <div>No dates configured yet.</div>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
+    {% endfor %}
+</div>
 
-    <div class="row">
-        <div class="col-12">
-            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">
-                <i class="bi bi-arrow-left"></i> Back to Dashboard
-            </a>
-        </div>
+<div class="callout callout-info mt-4">
+    <i class="bi bi-lightbulb"></i>
+    <div>
+        <div class="callout-title">Tips</div>
+        <ul>
+            <li>Add AI discussion dates before initializing slots</li>
+            <li>Optionally set custom time ranges for specific dates (e.g., 20:00-00:00 for evening slots, 08:00-00:00 for all-day)</li>
+            <li>Dates without custom times will use the job's default time range</li>
+            <li>Deleting a date will also delete all associated slots and bookings</li>
+            <li>After adding/updating times, remember to clear and re-initialize slots</li>
+        </ul>
     </div>
 </div>
 {% endblock %}

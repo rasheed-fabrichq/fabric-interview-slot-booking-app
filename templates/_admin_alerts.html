@@ -1,0 +1,13 @@
+{# Shared success/error alert pair for admin pages. Expects optional `success` / `error`. #}
+{% if success %}
+<div class="alert alert-success alert-dismissible fade show d-flex align-items-start gap-2">
+    <i class="bi bi-check-circle-fill mt-1"></i><div>{{ success }}</div>
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-danger alert-dismissible fade show d-flex align-items-start gap-2">
+    <i class="bi bi-exclamation-octagon-fill mt-1"></i><div>{{ error }}</div>
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}

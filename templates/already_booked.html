@@ -3,43 +3,64 @@
 {% block title %}Already Booked{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8">
-        <div class="card shadow">
-            <div class="card-header bg-success text-white">
-                <h3 class="mb-0">✓ Booking Confirmed</h3>
+{% set _b = branding if branding is defined and branding else {} %}
+{% set _support = _b.get('support_email') or 'support@fabrichq.ai' %}
+<div class="candidate-wrap">
+    <div class="card candidate-card">
+        <div class="candidate-hero hero-success">
+            <div class="hero-eyebrow"><i class="bi bi-check-circle-fill"></i> Booking Confirmed</div>
+            <h1>Your AI discussion slot is booked!</h1>
+            <p>{% if _b.get('company_name') %}{{ _b.get('company_name') }} · {% endif %}We look forward to speaking with you.</p>
+        </div>
+        <div class="card-body">
+            <div class="info-grid mb-4">
+                <div class="info-item">
+                    <div class="info-label"><i class="bi bi-person"></i>Name</div>
+                    <div class="info-value">{{ candidate.name }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label"><i class="bi bi-envelope"></i>Email</div>
+                    <div class="info-value">{{ candidate.email }}</div>
+                </div>
             </div>
-            <div class="card-body">
-                <div class="alert alert-success">
-                    <h5>Your AI discussion slot has been successfully booked!</h5>
-                </div>
 
-                <div class="mb-4">
-                    <h5>Your Details:</h5>
-                    <p><strong>Name:</strong> {{ candidate.name }}</p>
-                    <p><strong>Email:</strong> {{ candidate.email }}</p>
-                </div>
-
-                {% if booking %}
-                <div class="card bg-light">
-                    <div class="card-body">
-                        <h5 class="card-title">Your Booked Slot:</h5>
-                        <p><strong>Position:</strong> {{ booking.job_name }}</p>
-                        <p><strong>AI Discussion Day:</strong> {{ booking.day_of_week }}</p>
-                        <p><strong>Date:</strong> {{ booking.date }}</p>
-                        <p><strong>Time:</strong> {{ booking.start_time_formatted }} - {{ booking.end_time_formatted }}</p>
+            {% if booking %}
+            <div class="booked-slot mb-4">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="result-icon tone-success mb-0" style="width:52px;height:52px;font-size:1.4rem;box-shadow:none;">
+                        <i class="bi bi-calendar2-check"></i>
+                    </div>
+                    <div style="min-width:0;">
+                        <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;">Your Booked Slot</div>
+                        <div class="booked-time">{{ booking.start_time_formatted }} – {{ booking.end_time_formatted }}</div>
+                        <div class="booked-date">{{ booking.day_of_week }}, {{ booking.date }}</div>
+                        <div class="text-muted small mt-1"><i class="bi bi-briefcase me-1"></i>{{ booking.job_name }}</div>
                     </div>
                 </div>
-                {% endif %}
+            </div>
+            {% endif %}
 
-                <div class="alert alert-info mt-4">
-                    <strong>Note:</strong> You have already booked your assessment slot. You cannot make changes to your booking.
+            <div class="callout callout-info">
+                <i class="bi bi-info-circle"></i>
+                <div>
+                    <div class="callout-title">You have already booked your assessment slot.</div>
+                    You cannot make changes to your booking.
                     {% if booking %}
-                    <br><br>
-                    Your assessment link has been sent to <strong>{{ candidate.email }}</strong>.
-                    If you cannot find it, please check your spam folder or contact
-                    <strong>support@fabrichq.ai</strong>.
+                    <div class="mt-2">
+                        Your assessment link has been sent to <strong>{{ candidate.email }}</strong>.
+                        If you cannot find it, please check your spam folder or contact
+                        <a href="mailto:{{ _support }}" class="fw-semibold">{{ _support }}</a>.
+                    </div>
                     {% endif %}
+                </div>
+            </div>
+
+            <div class="help-strip">
+                <i class="bi bi-question-circle"></i>
+                <div>
+                    Questions? Read the
+                    <a href="{{ _b.get('faq_link') or 'https://docs.google.com/document/d/1xVZV7QoXUbp6csqoBzrn2Xd42e2n4F5edm3t6q-_hxs/edit?usp=sharing' }}" target="_blank" rel="noopener noreferrer" class="fw-semibold">Candidate Help FAQ</a>
+                    or email <a href="mailto:{{ _support }}" class="fw-semibold">{{ _support }}</a>.
                 </div>
             </div>
         </div>

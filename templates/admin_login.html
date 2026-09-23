@@ -1,32 +1,49 @@
 {% extends "base.html" %}
 
 {% block title %}Admin Login{% endblock %}
+{% block body_class %}admin-body{% endblock %}
 
-{% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-5">
-        <div class="card shadow">
-            <div class="card-header bg-primary text-white">
-                <h3 class="mb-0">Admin Login</h3>
+{% block body %}
+<div class="auth-wrap">
+    <div class="card auth-card">
+        <div class="card-body">
+            <div class="auth-brand">
+                <span class="brand-mark"><i class="bi bi-calendar2-check"></i></span>
+                <div>
+                    <div class="fw-bold fs-5 lh-sm">Slot Booking Admin</div>
+                    <div class="text-muted small">FabricHQ · AI Discussion scheduling</div>
+                </div>
             </div>
-            <div class="card-body">
-                {% if error %}
-                <div class="alert alert-danger">{{ error }}</div>
-                {% endif %}
 
-                <form method="POST">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="mb-3">
-                        <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" name="username" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" name="password" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100">Login</button>
-                </form>
+            <h2 class="h5 mb-1">Sign in</h2>
+            <p class="text-muted small mb-4">Use your admin credentials to manage jobs, slots and candidates.</p>
+
+            {% if error %}
+            <div class="alert alert-danger d-flex align-items-center gap-2">
+                <i class="bi bi-exclamation-circle"></i><span>{{ error }}</span>
             </div>
+            {% endif %}
+
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="mb-3">
+                    <label for="username" class="form-label">Username</label>
+                    <div class="input-icon">
+                        <i class="bi bi-person"></i>
+                        <input type="text" class="form-control" id="username" name="username" autocomplete="username" placeholder="admin@company.com" required autofocus>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label for="password" class="form-label">Password</label>
+                    <div class="input-icon">
+                        <i class="bi bi-lock"></i>
+                        <input type="password" class="form-control" id="password" name="password" autocomplete="current-password" placeholder="••••••••" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg w-100">
+                    Sign in <i class="bi bi-arrow-right"></i>
+                </button>
+            </form>
         </div>
     </div>
 </div>

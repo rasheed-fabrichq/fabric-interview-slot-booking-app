@@ -51,8 +51,47 @@ def init_database():
             slot_duration_minutes INTEGER NOT NULL,
             capacity_per_slot INTEGER NOT NULL,
             booking_enabled INTEGER DEFAULT 1,
+
+            -- Branding. Blank values fall back to the .env defaults, so
+            -- a job only needs the fields that differ for its client.
+            company_name TEXT,
+            email_reply_to TEXT,
+            email_cc TEXT,                      -- comma-separated, confirmation only
+            support_email TEXT,
+            faq_link TEXT,
+
+            -- Reminder email
+            reminder_email_enabled INTEGER NOT NULL DEFAULT 1,
+            reminder_lead_minutes INTEGER,      -- NULL: REMINDER_LEAD_MINUTES
+
+            -- Reminder call. call_enabled NULL follows CALLS_ENABLED.
+            call_enabled INTEGER,
+            call_lead_minutes INTEGER,
+            call_assistant_id TEXT,
+            call_agent_type TEXT,
+            call_agent_name TEXT,
+            call_company_name TEXT,             -- spoken; defaults to company_name
+            call_role_name TEXT,                -- spoken; defaults to job_name
+            call_disqualification_rate TEXT,
+            call_api_base_url TEXT,
+
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Per-job email templates, one row per job per kind. A job with no
+    # row for a kind is sent the default template from email_templates/.
+    # kind: 'confirmation' | 'reminder'
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS job_email_templates (
+            job_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (job_id, kind),
+            FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
         )
     ''')
 
@@ -284,63 +323,12 @@ def init_database():
         VALUES ('booking_enabled', 'true')
     ''')
 
-    # Seed initial job configurations
-    seed_job_configs(cursor)
+    # No jobs are seeded: every job is created from Admin > Jobs.
 
     conn.commit()
     conn.close()
 
     print("Database initialized successfully!")
-
-
-def seed_job_configs(cursor):
-    """Seed initial job configurations (only if they don't exist)"""
-    jobs = [
-        # {
-        #     'job_id': 'fc4c9c14-208c-427a-be2e-4d0080f286d6',
-        #     'job_name': 'Software Development Engineer I',
-        #     'start_time': '08:00',
-        #     'end_time': '00:00',
-        #     'duration': 60,
-        #     'capacity': 20,
-        #     'dates': []  # Dates will be added by admin
-        # },
-        # {
-        #     'job_id': 'b4f5ea74-a44a-4c93-a0f2-08abfaa337ed',
-        #     'job_name': 'Data Scientist – I',
-        #     'start_time': '08:00',
-        #     'end_time': '00:00',
-        #     'duration': 60,
-        #     'capacity': 15,
-        #     'dates': []  # Dates will be added by admin
-        # },
-        {
-            'job_id': 'ea85d314-1bb4-4bba-8702-d983915c6da6',
-            'job_name': 'Summer intern - Senior Operations Analyst',
-            'start_time': '08:00',
-            'end_time': '00:00',
-            'duration': 30,
-            'capacity': 15,
-            'dates': []  # Dates will be added by admin
-        }
-    ]
-
-    for job in jobs:
-        # Insert job config (ignore if already exists)
-        cursor.execute('''
-            INSERT OR IGNORE INTO job_configs
-            (job_id, job_name, slot_start_time, slot_end_time,
-             slot_duration_minutes, capacity_per_slot, booking_enabled)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-        ''', (job['job_id'], job['job_name'], job['start_time'],
-              job['end_time'], job['duration'], job['capacity']))
-
-        # Add dates for each job
-        for date, day in job['dates']:
-            cursor.execute('''
-                INSERT OR IGNORE INTO job_dates (job_id, date, day_of_week)
-                VALUES (?, ?, ?)
-            ''', (job['job_id'], date, day))
 
 
 # ==================== JOB CONFIGURATION FUNCTIONS ====================
@@ -461,6 +449,141 @@ def set_job_booking_enabled(job_id, enabled):
     conn.close()
 
     return {'success': True, 'booking_enabled': enabled}
+
+
+# ==================== JOB COMMUNICATION SETTINGS ====================
+
+# job_configs columns an admin can set from the Communications page.
+# Anything else passed to update_job_communication is ignored, so a
+# stray form field cannot write to scheduling columns.
+COMMUNICATION_FIELDS = (
+    'company_name', 'email_reply_to', 'email_cc', 'support_email',
+    'faq_link',
+    'reminder_email_enabled', 'reminder_lead_minutes',
+    'call_enabled', 'call_lead_minutes', 'call_assistant_id',
+    'call_agent_type', 'call_agent_name', 'call_company_name',
+    'call_role_name', 'call_disqualification_rate', 'call_api_base_url',
+)
+
+EMAIL_TEMPLATE_KINDS = ('confirmation', 'reminder')
+
+
+def get_job_communication(job_id):
+    """A job's communication settings, or None if the job does not exist.
+
+    Returns the COMMUNICATION_FIELDS columns plus job_name. Values are
+    as stored: NULL means "use the default", resolved by the caller.
+    """
+    conn = get_db_connection()
+    row = conn.execute(
+        f'SELECT job_id, job_name, {", ".join(COMMUNICATION_FIELDS)} '
+        f'FROM job_configs WHERE job_id = ?', (job_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_job_communications():
+    """Every job's communication settings, keyed by job_id."""
+    conn = get_db_connection()
+    rows = conn.execute(
+        f'SELECT job_id, job_name, {", ".join(COMMUNICATION_FIELDS)} '
+        f'FROM job_configs').fetchall()
+    conn.close()
+    return {row['job_id']: dict(row) for row in rows}
+
+
+def update_job_communication(job_id, **fields):
+    """Set communication fields for a job. Pass None to clear one."""
+    updates = {k: v for k, v in fields.items() if k in COMMUNICATION_FIELDS}
+    if not updates:
+        return {'error': 'No valid fields provided'}
+
+    assignments = ', '.join(f'{k} = ?' for k in updates)
+    conn = get_db_connection()
+    cursor = conn.execute(
+        f'UPDATE job_configs SET {assignments}, updated_at = ? '
+        f'WHERE job_id = ?',
+        (*updates.values(), datetime.now(), job_id))
+    conn.commit()
+    updated = cursor.rowcount
+    conn.close()
+
+    if not updated:
+        return {'error': 'Job not found'}
+    return {'success': True}
+
+
+def get_job_email_template(job_id, kind):
+    """The job's own template for this kind, or None to use the default."""
+    conn = get_db_connection()
+    row = conn.execute(
+        'SELECT subject, body, updated_at FROM job_email_templates '
+        'WHERE job_id = ? AND kind = ?', (job_id, kind)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_job_email_template(job_id, kind, subject, body):
+    """Create or replace a job's template for one kind."""
+    if kind not in EMAIL_TEMPLATE_KINDS:
+        return {'error': f'Unknown template kind: {kind}'}
+
+    conn = get_db_connection()
+    conn.execute('''
+        INSERT INTO job_email_templates (job_id, kind, subject, body, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(job_id, kind) DO UPDATE SET
+            subject = excluded.subject,
+            body = excluded.body,
+            updated_at = excluded.updated_at
+    ''', (job_id, kind, subject, body, datetime.now()))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+def delete_job_email_template(job_id, kind):
+    """Drop a job's template so it falls back to the default."""
+    conn = get_db_connection()
+    cursor = conn.execute(
+        'DELETE FROM job_email_templates WHERE job_id = ? AND kind = ?',
+        (job_id, kind))
+    conn.commit()
+    removed = cursor.rowcount
+    conn.close()
+    return removed > 0
+
+
+def copy_job_communication(source_job_id, target_job_id):
+    """Copy settings and templates from one job to another.
+
+    Replaces everything on the target, including clearing templates the
+    source does not have, so the two end up identical.
+    """
+    source = get_job_communication(source_job_id)
+    if not source:
+        return {'error': 'Source job not found'}
+
+    if not get_job_communication(target_job_id):
+        return {'error': 'Target job not found'}
+
+    with get_db_transaction() as conn:
+        assignments = ', '.join(f'{k} = ?' for k in COMMUNICATION_FIELDS)
+        conn.execute(
+            f'UPDATE job_configs SET {assignments}, updated_at = ? '
+            f'WHERE job_id = ?',
+            (*(source[k] for k in COMMUNICATION_FIELDS), datetime.now(),
+             target_job_id))
+
+        conn.execute('DELETE FROM job_email_templates WHERE job_id = ?',
+                     (target_job_id,))
+        conn.execute('''
+            INSERT INTO job_email_templates (job_id, kind, subject, body, updated_at)
+            SELECT ?, kind, subject, body, ?
+            FROM job_email_templates WHERE job_id = ?
+        ''', (target_job_id, datetime.now(), source_job_id))
+
+    return {'success': True}
 
 
 # ==================== JOB DATES FUNCTIONS ====================

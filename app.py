@@ -34,17 +34,22 @@ from database import (
     update_booking_email_status, get_booking_with_details,
     get_notifications_for_bookings, release_notification,
     get_notification_log, get_notification_stats,
-    get_call_logs, get_call_log, get_call_stats
+    get_call_logs, get_call_log, get_call_stats,
+    get_job_communication, update_job_communication,
+    save_job_email_template, delete_job_email_template,
+    copy_job_communication, EMAIL_TEMPLATE_KINDS,
 )
-from job_call_settings import (
-    get_all_job_call_configs, update_job_call_config, get_job_call_config
-)
+from job_call_settings import update_job_call_config, get_job_call_config
 from caller_utils import get_recording_url
 from config import (
     get_jobs, is_valid_job_id, get_job_name,
     ADMIN_USERNAME, ADMIN_PASSWORD
 )
-from email_utils import send_booking_confirmation
+from email_utils import (
+    send_booking_confirmation, get_template, get_job_branding,
+    find_unknown_placeholders, render_sample, send_test_email,
+    PLACEHOLDERS, KIND_ONLY_PLACEHOLDERS,
+)
 from phone_utils import normalize_phone
 
 # Delay between a booking and its confirmation email, in seconds.
@@ -128,6 +133,7 @@ def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, sl
             start_time=start_time_fmt,
             end_time=end_time_fmt,
             interview_link_with_expiry=interview_link_with_expiry,
+            job_id=job_id,
             duration_minutes=slot_duration,
         )
 
@@ -183,9 +189,16 @@ def is_valid_name(name):
 
 def extract_candidate_id_and_job_from_url(interview_link):
     """
-    Extract candidate_id and job_id from interview link URL
-    Expected format: https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
-    The older /interview/<JOB_UUID>/ form is still accepted.
+    Extract candidate_id and job_id from a candidate's link.
+
+    Two link types are accepted:
+      Application link: <domain>/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
+      Interview link:   <domain>/interviews/<ASSISTANT_UUID>/?candidate_id=<CANDIDATE_UUID>
+                        (singular /interview/ also accepted)
+
+    The UUID in the path is returned as job_id either way. For interview
+    links that means the job must be created with the assistant ID as its
+    Job ID -- the same setup used for the original /interview/ links.
     Returns: (candidate_id, job_id, error_message) tuple
     """
     if not interview_link or pd.isna(interview_link):
@@ -198,22 +211,24 @@ def extract_candidate_id_and_job_from_url(interview_link):
         if not url_str.startswith('http://') and not url_str.startswith('https://'):
             return None, None, "Invalid URL format - must start with http:// or https://"
 
-        # Extract job_id from the URL path: /jobs/<JOB_UUID>/ (current) or
-        # /interview/<JOB_UUID>/ (older links, still valid)
-        job_path_match = re.search(r'/(?:jobs|interview)/([a-f0-9\-]+)/?',
+        # The job (or interview assistant) ID from the URL path.
+        job_path_match = re.search(r'/(?:jobs|interviews?)/([a-f0-9\-]+)/?',
                                    url_str, re.IGNORECASE)
         if not job_path_match:
-            return None, None, "job_id not found in URL path - expected format: /jobs/<JOB_UUID>/"
+            return None, None, ("ID not found in URL path - expected "
+                                "/jobs/<JOB_UUID>/ or /interviews/<ASSISTANT_UUID>/")
 
         job_id = job_path_match.group(1).strip()
 
         # Validate job_id is a valid UUID
         if not is_valid_uuid(job_id):
-            return None, None, f"Extracted job_id '{job_id}' is not a valid UUID"
+            return None, None, f"ID '{job_id}' in the link is not a valid UUID"
 
         # Validate job_id exists in our system
         if not is_valid_job_id(job_id):
-            return None, None, f"Extracted job_id '{job_id}' is not configured in the system"
+            return None, None, (f"No job has ID '{job_id}'. For interview "
+                                f"links, create the job with the assistant "
+                                f"ID from the link as its Job ID")
 
         # Extract candidate_id from query parameter
         candidate_match = re.search(r'[?&]candidate_id=([^&]+)', url_str)
@@ -293,7 +308,8 @@ def booking_form():
     # Check if booking is enabled for this specific job
     if not is_booking_enabled_for_job(job_id):
         return render_template('booking_closed.html',
-                             message=f'Booking for {get_job_name(job_id)} is currently closed.')
+                             message=f'Booking for {get_job_name(job_id)} is currently closed.',
+                             branding=get_job_branding(job_id))
 
     # Get candidate details
     candidate = get_candidate(candidate_id, job_id)
@@ -323,7 +339,8 @@ def booking_form():
 
         return render_template('already_booked.html',
                              candidate=candidate,
-                             booking=booking)
+                             booking=booking,
+                             branding=get_job_branding(job_id))
 
     # Update status to 'clicked' if it was 'pending'
     if candidate['status'] == 'pending':
@@ -340,7 +357,8 @@ def booking_form():
                          candidate=candidate,
                          booking_token=booking_token,
                          job_id=job_id,
-                         job_name=get_job_name(job_id))
+                         job_name=get_job_name(job_id),
+                         branding=get_job_branding(job_id))
 
 
 @app.route('/api/job-dates')
@@ -646,7 +664,7 @@ def admin_upload():
                     # Validation 3: Verify job_id matches selected job
                     if extracted_job_id != job_id:
                         error_count += 1
-                        errors.append(f"Row {row_num}: job_id mismatch - Interview link has '{extracted_job_id}' but you selected '{job_id}' | Row data: {row_display}")
+                        errors.append(f"Row {row_num}: ID mismatch - link has '{extracted_job_id}' but the selected job's ID is '{job_id}' | Row data: {row_display}")
                         continue
 
                     # Validation 4: Validate UUID
@@ -1197,83 +1215,280 @@ def admin_call_recording(execution_id):
 @app.route('/admin/call-config', methods=['GET', 'POST'])
 @admin_required
 def admin_call_config():
-    """Per-job overrides for the reminder call.
+    """Call settings now live on the Communications page, per job."""
+    job_id = request.values.get('job_id')
+    return redirect(url_for('admin_communications', tab='call',
+                            **({'job_id': job_id} if job_id else {})))
 
-    Every field is optional: a blank field clears the override and the
-    job falls back to the .env default, so a single-job deployment can
-    ignore this page entirely.
+
+COMMUNICATION_TABS = ('branding', 'confirmation', 'reminder', 'call')
+
+
+def _form_value(field):
+    """A stripped form value, or None when blank (clears the setting)."""
+    value = (request.form.get(field) or '').strip()
+    return value or None
+
+
+def _positive_int(field, label):
+    """Parse an optional positive whole number. Returns (value, error)."""
+    raw = _form_value(field)
+    if raw is None:
+        return None, None
+    try:
+        value = int(raw)
+        if value <= 0:
+            raise ValueError
+        return value, None
+    except ValueError:
+        return None, f'{label} must be a positive whole number'
+
+
+def _invalid_addresses(raw):
+    """Entries in a comma-separated address list that are not emails."""
+    return [a.strip() for a in (raw or '').split(',')
+            if a.strip() and not is_valid_email(a.strip())]
+
+
+def _save_branding(job_id):
+    for field, label in (('email_reply_to', 'Reply-to'),
+                         ('support_email', 'Support email'),
+                         ('email_cc', 'CC')):
+        bad = _invalid_addresses(request.form.get(field))
+        if bad:
+            return None, f'{label}: not a valid email address: {", ".join(bad)}'
+
+    faq_link = _form_value('faq_link')
+    if faq_link and not faq_link.startswith(('http://', 'https://')):
+        return None, 'FAQ link must start with http:// or https://'
+
+    cc = _form_value('email_cc')
+    if cc:
+        cc = ', '.join(a.strip() for a in cc.split(',') if a.strip())
+
+    update_job_communication(
+        job_id,
+        company_name=_form_value('company_name'),
+        email_reply_to=_form_value('email_reply_to'),
+        email_cc=cc,
+        support_email=_form_value('support_email'),
+        faq_link=faq_link,
+    )
+    return 'Branding saved', None
+
+
+def _save_template(job_id, kind):
+    subject = (request.form.get('subject') or '').strip()
+    body = request.form.get('body') or ''
+
+    if not subject or not body.strip():
+        return None, 'Subject and body are both required'
+
+    unknown = find_unknown_placeholders(subject + body, kind)
+    if unknown:
+        return None, (f'Unknown placeholder(s): {", ".join(unknown)}. '
+                      f'Use only the placeholders listed beside the editor.')
+
+    save_job_email_template(job_id, kind, subject, body)
+    label = 'Confirmation' if kind == 'confirmation' else 'Reminder'
+    return f'{label} email saved', None
+
+
+def _save_reminder_settings(job_id):
+    lead, error = _positive_int('reminder_lead_minutes', 'Reminder lead time')
+    if error:
+        return None, error
+    enabled = request.form.get('reminder_email_enabled') == 'on'
+    update_job_communication(
+        job_id,
+        reminder_email_enabled=1 if enabled else 0,
+        reminder_lead_minutes=lead,
+    )
+    return (f'Reminder emails turned {"on" if enabled else "off"}'), None
+
+
+def _save_call(job_id):
+    lead, error = _positive_int('lead_minutes', 'Call lead time')
+    if error:
+        return None, error
+
+    calls_enabled = request.form.get('calls_enabled')
+    # 'inherit' leaves the column NULL so the env value applies.
+    enabled_value = (None if calls_enabled == 'inherit'
+                     else (1 if calls_enabled == 'on' else 0))
+
+    update_job_call_config(
+        job_id,
+        calls_enabled=enabled_value,
+        assistant_id=_form_value('assistant_id'),
+        agent_type=_form_value('agent_type'),
+        agent_name=_form_value('agent_name'),
+        company_name=_form_value('company_name'),
+        role_name=_form_value('role_name'),
+        disqualification_rate=_form_value('disqualification_rate'),
+        lead_minutes=lead,
+        api_base_url=_form_value('api_base_url'),
+    )
+    return 'AI call settings saved', None
+
+
+@app.route('/admin/communications', methods=['GET', 'POST'])
+@admin_required
+def admin_communications():
+    """Per-job branding, email templates and reminder settings.
+
+    Everything a candidate receives is configured here per job, so one
+    deployment can serve several clients at once.
     """
-    error = None
-    success = None
+    jobs = get_jobs()
+    job_id = request.values.get('job_id')
+    if not job_id or job_id not in jobs:
+        job_id = next(iter(jobs), None)
 
-    if request.method == 'POST':
-        job_id = request.form.get('job_id')
-        if not is_valid_job_id(job_id):
-            error = 'Invalid job ID'
+    tab = request.values.get('tab')
+    if tab not in COMMUNICATION_TABS:
+        tab = 'branding'
+
+    success = error = None
+    # Unsaved template edits, re-shown if the save is rejected.
+    submitted = {}
+
+    if request.method == 'POST' and job_id:
+        action = request.form.get('action')
+        kind = request.form.get('kind')
+
+        if action == 'save_branding':
+            success, error = _save_branding(job_id)
+        elif action == 'save_template' and kind in EMAIL_TEMPLATE_KINDS:
+            success, error = _save_template(job_id, kind)
+            if error:
+                submitted[kind] = {
+                    'subject': request.form.get('subject') or '',
+                    'body': request.form.get('body') or '',
+                    'is_custom': True,
+                }
+        elif action == 'reset_template' and kind in EMAIL_TEMPLATE_KINDS:
+            delete_job_email_template(job_id, kind)
+            success = 'Template reset to the default'
+        elif action == 'save_reminder_settings':
+            success, error = _save_reminder_settings(job_id)
+        elif action == 'save_call':
+            success, error = _save_call(job_id)
+        elif action == 'copy_from':
+            source = request.form.get('source_job_id')
+            if source == job_id or source not in jobs:
+                error = 'Choose a different job to copy from'
+            else:
+                result = copy_job_communication(source, job_id)
+                error = result.get('error')
+                if not error:
+                    success = (f'Copied all communication settings from '
+                               f'{jobs[source]}')
         else:
-            def blank_to_none(field):
-                value = (request.form.get(field) or '').strip()
-                return value or None
+            error = 'Unknown action'
 
-            calls_enabled = request.form.get('calls_enabled')
-            # 'inherit' leaves the column NULL so the env value applies.
-            enabled_value = (None if calls_enabled == 'inherit'
-                             else (1 if calls_enabled == 'on' else 0))
+    settings = get_job_communication(job_id) if job_id else None
+    templates = {kind: submitted.get(kind) or get_template(job_id, kind)
+                 for kind in EMAIL_TEMPLATE_KINDS} if job_id else {}
 
-            lead = blank_to_none('lead_minutes')
-            try:
-                lead_value = int(lead) if lead else None
-                if lead_value is not None and lead_value <= 0:
-                    raise ValueError
-            except ValueError:
-                lead_value = None
-                error = 'Lead minutes must be a positive whole number'
+    placeholders = {
+        kind: {token: help_text for token, help_text in PLACEHOLDERS.items()
+               if KIND_ONLY_PLACEHOLDERS.get(token, kind) == kind}
+        for kind in EMAIL_TEMPLATE_KINDS
+    }
 
-            if not error:
-                update_job_call_config(
-                    job_id,
-                    calls_enabled=enabled_value,
-                    assistant_id=blank_to_none('assistant_id'),
-                    agent_type=blank_to_none('agent_type'),
-                    agent_name=blank_to_none('agent_name'),
-                    company_name=blank_to_none('company_name'),
-                    role_name=blank_to_none('role_name'),
-                    disqualification_rate=blank_to_none(
-                        'disqualification_rate'),
-                    lead_minutes=lead_value,
-                    api_base_url=blank_to_none('api_base_url'),
-                )
-                # Overrides are hardcoded in job_call_settings.py for
-                # now, so a save from here only affects this process.
-                success = (
-                    f'Call settings applied for {get_job_name(job_id)} '
-                    f'in this process only. To make the change permanent, '
-                    f'add it to JOB_CALL_CONFIGS in job_call_settings.py '
-                    f'— the reminder worker runs separately and will not '
-                    f'see it otherwise.')
-
-    # The env values, shown as the placeholder in each field so it is
-    # clear what a blank field will fall back to.
+    # What a blank field falls back to, shown as each field's placeholder.
+    env_branding = get_job_branding(None)
     defaults = {
+        'company_name': env_branding['company_name'],
+        'email_reply_to': env_branding['reply_to'],
+        'email_cc': ', '.join(env_branding['cc']),
+        'support_email': env_branding['support_email'],
+        'faq_link': env_branding['faq_link'],
+        'reminder_lead_minutes': os.environ.get('REMINDER_LEAD_MINUTES', '15'),
+        'call_lead_minutes': os.environ.get('CALL_LEAD_MINUTES', '30'),
         'assistant_id': os.environ.get('CALLER_ASSISTANT_ID', ''),
         'agent_type': os.environ.get('CALLER_AGENT_TYPE',
                                      'integrity_reminder'),
         'agent_name': os.environ.get('CALLER_AGENT_NAME', 'Riya'),
-        'company_name': os.environ.get('CALLER_COMPANY_NAME', 'Meesho'),
+        'call_company_name': ((settings or {}).get('company_name')
+                              or os.environ.get('CALLER_COMPANY_NAME', '')),
+        'role_name': jobs.get(job_id, ''),
         'disqualification_rate': os.environ.get(
             'CALL_DISQUALIFICATION_RATE', 'eighty percent'),
-        'lead_minutes': os.environ.get('CALL_LEAD_MINUTES', '30'),
         'api_base_url': os.environ.get('CALLER_API_BASE_URL',
                                        'http://localhost:8000'),
         'calls_enabled': os.environ.get('CALLS_ENABLED', 'false'),
     }
 
-    return render_template('admin_call_config.html',
-                           jobs=get_jobs(),
-                           call_configs=get_all_job_call_configs(),
+    return render_template('admin_communications.html',
+                           jobs=jobs,
+                           job_id=job_id,
+                           job_name=jobs.get(job_id, ''),
+                           settings=settings or {},
+                           templates=templates,
+                           placeholders=placeholders,
                            defaults=defaults,
-                           error=error,
-                           success=success)
+                           tab=tab,
+                           admin_email=ADMIN_USERNAME,
+                           success=success,
+                           error=error)
+
+
+def _template_from_request(data):
+    """The subject/body an editor posted, for preview and test sends."""
+    return {'subject': (data.get('subject') or '').strip(),
+            'body': data.get('body') or ''}
+
+
+def _check_editor_request(data):
+    """Validate a preview/test request. Returns (template, error)."""
+    if (not is_valid_job_id(data.get('job_id'))
+            or data.get('kind') not in EMAIL_TEMPLATE_KINDS):
+        return None, 'Invalid job or template kind'
+    template = _template_from_request(data)
+    unknown = find_unknown_placeholders(
+        template['subject'] + template['body'], data['kind'])
+    if unknown:
+        return None, f'Unknown placeholder(s): {", ".join(unknown)}'
+    return template, None
+
+
+@app.route('/admin/communications/preview', methods=['POST'])
+@admin_required
+def admin_communications_preview():
+    """Render the editor's current, unsaved template with sample data."""
+    data = request.get_json(silent=True) or {}
+    template, error = _check_editor_request(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    subject, html_body, error = render_sample(
+        data['job_id'], get_job_name(data['job_id']), data['kind'], template)
+    if error:
+        return jsonify({'error': error}), 400
+    return jsonify({'subject': subject, 'html': html_body})
+
+
+@app.route('/admin/communications/test-email', methods=['POST'])
+@admin_required
+def admin_communications_test_email():
+    """Send the editor's current template, with sample data, to an admin."""
+    data = request.get_json(silent=True) or {}
+    template, error = _check_editor_request(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    to_address = (data.get('to') or '').strip()
+    if not is_valid_email(to_address):
+        return jsonify({'error': 'Enter a valid email address'}), 400
+
+    ok, error = send_test_email(data['job_id'], get_job_name(data['job_id']),
+                                data['kind'], to_address, template)
+    if not ok:
+        return jsonify({'error': error or 'Send failed'}), 502
+    return jsonify({'success': True,
+                    'message': f'Test email sent to {to_address}'})
 
 
 @app.route('/admin/notifications')

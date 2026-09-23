@@ -1,74 +1,70 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 
-{% block title %}Initialize Slots{% endblock %}
+{% block page_title %}Initialize Slots{% endblock %}
+{% block page_subtitle %}Generate bookable time slots for each job from its configuration and dates.{% endblock %}
 
-{% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>Initialize AI Discussion Slots</h2>
-            <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
-        </div>
-    </div>
-</div>
+{% block admin_content %}
+{% include "_admin_alerts.html" %}
 
-{% if success %}
-<div class="alert alert-success alert-dismissible fade show">
-    {{ success }}
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
-
-{% if error %}
-<div class="alert alert-danger alert-dismissible fade show">
-    {{ error }}
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
-
-<div class="row">
+<div class="row g-4">
     {% for job_id, job_name in jobs.items() %}
     {% set config = configs|selectattr('job_id', 'equalto', job_id)|first %}
-    <div class="col-md-4 mb-4">
-        <div class="card shadow h-100">
-            <div class="card-header bg-success text-white">
-                <h5 class="mb-0">{{ job_name }}</h5>
+    <div class="col-md-6 col-xxl-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <span class="card-title-icon tone-success"><i class="bi bi-lightning-charge"></i></span>
+                <div class="me-auto" style="min-width:0;"><h5 class="text-truncate">{{ job_name }}</h5></div>
             </div>
-            <div class="card-body">
+            <div class="card-body d-flex flex-column">
                 {% if config %}
-                <div class="mb-3">
-                    <strong>Configuration:</strong>
-                    <ul class="small mb-2">
-                        <li>Time: {{ config.slot_start_time }} - {{ config.slot_end_time }}</li>
-                        <li>Duration: {{ config.slot_duration_minutes }} minutes</li>
-                        <li>Capacity: {{ config.capacity_per_slot }} per slot</li>
-                    </ul>
+                <div class="form-section-title">Configuration</div>
+                <div class="job-metrics mb-3">
+                    <div class="metric">
+                        <div class="metric-label">Time</div>
+                        <div class="fw-semibold small">{{ config.slot_start_time }} - {{ config.slot_end_time }}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Duration</div>
+                        <div class="fw-semibold small">{{ config.slot_duration_minutes }} minutes</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Capacity</div>
+                        <div class="fw-semibold small">{{ config.capacity_per_slot }} per slot</div>
+                    </div>
                 </div>
 
-                <div class="alert alert-info small mb-3">
-                    This will create time slots for all configured dates for this job.
+                <p class="small text-muted mb-3">
+                    <i class="bi bi-info-circle me-1"></i>This will create time slots for all configured dates for this job.
+                </p>
+
+                <div class="mt-auto d-flex flex-column gap-2">
+                    <form method="POST" action="{{ url_for('admin_init_slots') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="job_id" value="{{ job_id }}">
+                        <button type="submit" class="btn btn-success w-100"
+                                onclick="return confirm('Initialize slots for {{ job_name }}?')">
+                            <i class="bi bi-lightning-fill"></i> Initialize Slots
+                        </button>
+                    </form>
+
+                    <div class="d-flex gap-2">
+                        <a href="/admin/slots?job_id={{ job_id }}" class="btn btn-outline-secondary btn-sm flex-fill">
+                            <i class="bi bi-eye"></i> View Slots
+                        </a>
+                        <form method="POST" action="{{ url_for('admin_clear_slots') }}" class="flex-fill">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="job_id" value="{{ job_id }}">
+                            <button type="submit" class="btn btn-outline-danger btn-sm w-100"
+                                    onclick="return confirm('Clear all slots and bookings for {{ job_name }}? This cannot be undone!')">
+                                <i class="bi bi-trash"></i> Clear Slots
+                            </button>
+                        </form>
+                    </div>
                 </div>
-
-                <form method="POST" action="{{ url_for('admin_init_slots') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="job_id" value="{{ job_id }}">
-                    <button type="submit" class="btn btn-success w-100 mb-2"
-                            onclick="return confirm('Initialize slots for {{ job_name }}?')">
-                        <i class="bi bi-lightning-fill"></i> Initialize Slots
-                    </button>
-                </form>
-
-                <form method="POST" action="{{ url_for('admin_clear_slots') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="job_id" value="{{ job_id }}">
-                    <button type="submit" class="btn btn-outline-danger btn-sm w-100"
-                            onclick="return confirm('Clear all slots and bookings for {{ job_name }}? This cannot be undone!')">
-                        <i class="bi bi-trash"></i> Clear Slots
-                    </button>
-                </form>
                 {% else %}
-                <div class="alert alert-warning small">
-                    Configuration not found for this job.
+                <div class="callout callout-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <div>Configuration not found for this job.</div>
                 </div>
                 {% endif %}
             </div>
@@ -77,17 +73,16 @@
     {% endfor %}
 </div>
 
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="alert alert-warning">
-            <strong>⚠️ Important Notes:</strong>
-            <ul class="mb-0">
-                <li>Slots must be initialized before candidates can book</li>
-                <li>Ensure job configuration and dates are set before initializing</li>
-                <li>Clearing slots will delete all bookings for that job</li>
-                <li>You can initialize each job independently</li>
-            </ul>
-        </div>
+<div class="callout callout-warning mt-4">
+    <i class="bi bi-exclamation-triangle"></i>
+    <div>
+        <div class="callout-title">Important Notes</div>
+        <ul>
+            <li>Slots must be initialized before candidates can book</li>
+            <li>Ensure job configuration and dates are set before initializing</li>
+            <li>Clearing slots will delete all bookings for that job</li>
+            <li>You can initialize each job independently</li>
+        </ul>
     </div>
 </div>
 {% endblock %}

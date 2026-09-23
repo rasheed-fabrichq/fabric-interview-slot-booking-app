@@ -42,7 +42,7 @@ from config import now_local
 from database import (
     get_bookings_due_for_reminder, claim_notification, mark_notification,
     init_database, create_call_log, get_pollable_call_logs,
-    update_call_log, bump_call_poll_attempt,
+    update_call_log, bump_call_poll_attempt, get_all_job_communications,
 )
 from job_call_settings import get_job_call_config, get_all_job_call_configs
 from email_utils import send_slot_reminder, last_message_id
@@ -72,8 +72,24 @@ def _int_env(key, default):
 
 
 def get_lead_minutes():
-    """How long before a slot the reminder goes out."""
+    """Default for how long before a slot the reminder email goes out.
+
+    A job can set its own lead on the Communications page.
+    """
     return _int_env('REMINDER_LEAD_MINUTES', 15)
+
+
+def job_email_lead_minutes(job_settings):
+    """Reminder email lead for one job, falling back to the global value."""
+    lead = (job_settings or {}).get('reminder_lead_minutes')
+    return int(lead) if lead else get_lead_minutes()
+
+
+def job_email_enabled(job_settings):
+    """Whether this job sends reminder emails. On unless switched off."""
+    if not job_settings:
+        return True
+    return bool(job_settings.get('reminder_email_enabled', 1))
 
 
 def get_call_lead_minutes():
@@ -182,6 +198,7 @@ def send_one(booking, now, dry_run=False):
             end_time=end_dt.strftime('%I:%M %p'),
             interview_link_with_expiry=build_interview_link(booking),
             minutes_until=minutes_until,
+            job_id=job_id,
             duration_minutes=duration,
         )
     except Exception as exc:
@@ -468,12 +485,42 @@ def _run_calls(now, grace, dry_run=False):
     return counts
 
 
+def _due_emails(now, grace):
+    """Bookings due a reminder email, each against its own job's lead.
+
+    Same shape as _run_calls: one query using the widest lead among
+    jobs that send reminders, then a per-job filter in memory.
+    """
+    settings = get_all_job_communications()
+    enabled = {job_id: cfg for job_id, cfg in settings.items()
+               if job_email_enabled(cfg)}
+    if not enabled:
+        return []
+
+    widest_lead = max(job_email_lead_minutes(cfg)
+                      for cfg in enabled.values())
+    candidates = get_bookings_due_for_reminder(
+        lead_minutes=widest_lead, channel=CHANNEL, kind=KIND,
+        now=now, window_minutes=grace)
+
+    due = []
+    for booking in candidates:
+        cfg = enabled.get(booking['job_id'])
+        if cfg is None:
+            continue
+        minutes_until = (booking['slot_datetime'] - now).total_seconds() / 60
+        if minutes_until <= job_email_lead_minutes(cfg):
+            due.append(booking)
+    return due
+
+
 def run_once(dry_run=False, now=None):
     """One pass: send every due email, then place every due call.
 
     The two channels are independent -- a candidate still gets the call
     if SES is down, and still gets the email if the calling system is
-    unreachable. Each has its own lead time and its own claim row.
+    unreachable. Each has its own lead time and its own claim row, and
+    each can be switched off per job.
 
     Returns a count per outcome, combined across both channels.
     """
@@ -481,9 +528,7 @@ def run_once(dry_run=False, now=None):
     lead = get_lead_minutes()
     grace = get_grace_minutes()
 
-    due = get_bookings_due_for_reminder(
-        lead_minutes=lead, channel=CHANNEL, kind=KIND,
-        now=now, window_minutes=grace)
+    due = _due_emails(now, grace)
 
     counts = {'sent': 0, 'failed': 0, 'skipped': 0, 'claimed-by-other': 0}
 
@@ -503,7 +548,7 @@ def run_once(dry_run=False, now=None):
             _heartbeat(now, lead, grace)
         return counts
 
-    logger.info('%s reminder(s) due within %s minutes', len(due), lead)
+    logger.info('%s reminder email(s) due', len(due))
     for booking in due:
         outcome = send_one(booking, now, dry_run=dry_run)
         counts[outcome] = counts.get(outcome, 0) + 1

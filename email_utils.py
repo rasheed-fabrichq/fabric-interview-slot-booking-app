@@ -2,6 +2,7 @@
 Email utility for sending booking confirmation emails via AWS SES.
 """
 import boto3
+import html
 import logging
 import os
 import re
@@ -17,66 +18,228 @@ def _cfg(key, default=''):
     return os.environ.get(key, default)
 
 
-# The confirmation email body lives in email_templates/ so the markup can
-# be edited without touching Python. Placeholder names must match the
-# substitutions in send_booking_confirmation below.
-TEMPLATE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'email_templates', 'aays_slot_confirmed.html')
+TEMPLATE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'email_templates')
 
-# The shortly-before-your-slot reminder, sent by reminder_worker.py.
-REMINDER_TEMPLATE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'email_templates', 'meesho_slot_reminder.html')
+# What a job is sent when it has no template of its own. Company name,
+# support address and links are placeholders, so these defaults carry no
+# client branding.
+DEFAULT_TEMPLATES = {
+    'confirmation': {
+        'file': 'default_slot_confirmed.html',
+        'subject': ('{{Company Name}}: Your AI Interview is Confirmed '
+                    '\u2013 {{Date}}, {{Start Time}} IST'),
+    },
+    'reminder': {
+        'file': 'default_slot_reminder.html',
+        'subject': ('Reminder: Your {{Company Name}} AI Interview starts '
+                    'at {{Start Time}} IST ({{Date}})'),
+    },
+}
 
+# Every placeholder a template may use, with the help text the admin
+# editor shows. Templates are checked against this on save, so a typo
+# is caught there rather than when a candidate's email fails to send.
+PLACEHOLDERS = {
+    '{{Candidate Name}}': "Candidate's full name",
+    '{{Candidate Email}}': "Candidate's email address",
+    '{{Job Name}}': 'Job title as configured',
+    '{{Company Name}}': "The job's company name",
+    '{{Slot Date}}': 'Day and date, e.g. Thursday, 20-11-2025',
+    '{{Date}}': 'Date only, e.g. 20-11-2025',
+    '{{Day}}': 'Weekday, e.g. Thursday',
+    '{{Start Time}}': 'Slot start, e.g. 10:00 AM',
+    '{{End Time}}': 'Slot end, e.g. 10:30 AM',
+    '{{Duration}}': 'Slot length, e.g. 30 Minutes',
+    '{{Assessment Link}}': "The candidate's interview link for this slot",
+    '{{Unique Interview Link}}': 'Same as {{Assessment Link}}',
+    '{{FAQ Document Link}}': "The job's FAQ link",
+    '{{Support Email}}': "The job's support email address",
+    '{{Minutes Until}}': 'Reminder only: minutes until the slot starts',
+}
 
-def _load_template(path=None):
-    with open(path or TEMPLATE_PATH, encoding='utf-8') as f:
-        return f.read()
+# Placeholders that only have a value for some kinds.
+KIND_ONLY_PLACEHOLDERS = {'{{Minutes Until}}': 'reminder'}
 
+DEFAULT_SUPPORT_EMAIL = 'support@fabrichq.ai'
 
-# Candidate-facing FAQ, linked from the confirmation email. Override with
-# FAQ_DOCUMENT_LINK in .env.
-FAQ_DOCUMENT_LINK = os.environ.get(
-    'FAQ_DOCUMENT_LINK',
+# Candidate-facing FAQ, used when a job does not set its own. Override
+# with FAQ_DOCUMENT_LINK in .env.
+DEFAULT_FAQ_LINK = (
     'https://docs.google.com/document/d/'
     '1xVZV7QoXUbp6csqoBzrn2Xd42e2n4F5edm3t6q-_hxs/edit?usp=sharing')
 
 
-CONFIRMATION_EMAIL_TEMPLATE = _load_template()
-REMINDER_EMAIL_TEMPLATE = _load_template(REMINDER_TEMPLATE_PATH)
+def _load_template_file(filename):
+    with open(os.path.join(TEMPLATE_DIR, filename), encoding='utf-8') as f:
+        return f.read()
 
 
-def _confirmation_cc():
-    """Addresses copied on every booking confirmation.
+def get_default_template(kind):
+    """The built-in subject and body for a kind."""
+    default = DEFAULT_TEMPLATES[kind]
+    return {'subject': default['subject'],
+            'body': _load_template_file(default['file'])}
 
-    Comma-separated in EMAIL_CONFIRMATION_CC. Read at call time rather
-    than at import, so the list can change without a code edit. These
-    are visible to the candidate in the Cc header, and each address
-    receives one copy per booking -- keep it to the client's panel.
+
+def get_template(job_id, kind):
+    """The job's own template for a kind, else the default.
+
+    Read at send time, so an edit in the admin panel applies to the
+    next email without restarting the app or the reminder worker.
     """
-    raw = _cfg('EMAIL_CONFIRMATION_CC', '')
-    return [addr.strip() for addr in raw.split(',') if addr.strip()]
+    from database import get_job_email_template
+    custom = get_job_email_template(job_id, kind) if job_id else None
+    if custom:
+        return {'subject': custom['subject'], 'body': custom['body'],
+                'is_custom': True}
+    template = get_default_template(kind)
+    template['is_custom'] = False
+    return template
 
 
-def _render(template, substitutions):
+def _split_addresses(raw):
+    return [addr.strip() for addr in (raw or '').split(',') if addr.strip()]
+
+
+def get_job_branding(job_id):
+    """Resolved sender and branding values for a job.
+
+    Each value is the job's own setting if it has one, else the .env
+    default, else a built-in default -- so a job set up with nothing
+    still sends a complete email.
+    """
+    from database import get_job_communication
+    job = (get_job_communication(job_id) if job_id else None) or {}
+
+    return {
+        'company_name': (job.get('company_name')
+                         or _cfg('EMAIL_COMPANY_NAME', 'Fabric')),
+        'reply_to': (job.get('email_reply_to')
+                     or _cfg('EMAIL_REPLY_TO', DEFAULT_SUPPORT_EMAIL)),
+        # CC falls back to env only when the job has never set one; a
+        # job can't clear an env CC except by setting its own.
+        'cc': _split_addresses(job.get('email_cc')
+                               or _cfg('EMAIL_CONFIRMATION_CC', '')),
+        'support_email': (job.get('support_email')
+                          or _cfg('EMAIL_REPLY_TO', DEFAULT_SUPPORT_EMAIL)),
+        'faq_link': (job.get('faq_link')
+                     or _cfg('FAQ_DOCUMENT_LINK', DEFAULT_FAQ_LINK)),
+    }
+
+
+def find_unknown_placeholders(text, kind):
+    """Placeholders in text that would not be filled for this kind."""
+    unknown = []
+    for token in sorted(set(re.findall(r'{{[^}]+}}', text or ''))):
+        only_for = KIND_ONLY_PLACEHOLDERS.get(token)
+        if token not in PLACEHOLDERS or (only_for and only_for != kind):
+            unknown.append(token)
+    return unknown
+
+
+def build_substitutions(kind, branding, candidate_name, candidate_email,
+                        job_name, slot_date, day_of_week, start_time,
+                        end_time, interview_link, duration_minutes=None,
+                        minutes_until=None):
+    """Placeholder values for one email."""
+    values = {
+        '{{Candidate Name}}': candidate_name,
+        '{{Candidate Email}}': candidate_email,
+        '{{Job Name}}': job_name,
+        '{{Company Name}}': branding['company_name'],
+        '{{Slot Date}}': f'{day_of_week}, {slot_date}',
+        '{{Date}}': slot_date,
+        '{{Day}}': day_of_week,
+        '{{Start Time}}': start_time,
+        '{{End Time}}': end_time,
+        '{{Duration}}': (f'{duration_minutes} Minutes'
+                         if duration_minutes else ''),
+        '{{Assessment Link}}': interview_link,
+        '{{Unique Interview Link}}': interview_link,
+        '{{FAQ Document Link}}': branding['faq_link'],
+        '{{Support Email}}': branding['support_email'],
+    }
+    if kind == 'reminder':
+        values['{{Minutes Until}}'] = str(minutes_until or 0)
+    return values
+
+
+def _render(template, substitutions, escape=False):
     """Substitute {{Placeholder}} tokens and verify none were missed.
 
     A renamed placeholder in the template would otherwise reach the
     candidate as literal "{{...}}" text -- and if it were the link, with
-    no way to join at all. Returns (html, error).
-    """
-    html_content = template
-    for token, value in substitutions:
-        html_content = html_content.replace(token, value if value else '')
+    no way to join at all. Returns (text, error).
 
-    leftover = re.findall(r'{{[^}]+}}', html_content)
+    escape HTML-escapes the values, for bodies: a company or candidate
+    name with "&" or "<" would otherwise break the markup.
+    """
+    rendered = template
+    for token, value in substitutions.items():
+        value = str(value) if value else ''
+        rendered = rendered.replace(
+            token, html.escape(value) if escape else value)
+
+    leftover = re.findall(r'{{[^}]+}}', rendered)
     if leftover:
         msg = f"Email template has unsubstituted placeholders: {leftover}"
         logger.error(msg)
         print(f"[SES] ERROR: {msg}")
         return None, msg
-    return html_content, None
+    return rendered, None
+
+
+def render_email(template, substitutions):
+    """Render a template's subject and body. Returns (subject, html, error)."""
+    subject, error = _render(template['subject'], substitutions)
+    if error:
+        return None, None, error
+    body, error = _render(template['body'], substitutions, escape=True)
+    if error:
+        return None, None, error
+    return subject, body, None
+
+
+# Values a preview or test email is rendered with.
+SAMPLE_VALUES = {
+    'candidate_name': 'Priya Sharma',
+    'candidate_email': 'priya.sharma@example.com',
+    'slot_date': '20-11-2026',
+    'day_of_week': 'Friday',
+    'start_time': '10:00 AM',
+    'end_time': '10:30 AM',
+    'interview_link': 'https://app.fabrichq.ai/interview/sample/?candidate_id=sample',
+    'duration_minutes': 30,
+    'minutes_until': 15,
+}
+
+
+def render_sample(job_id, job_name, kind, template=None):
+    """Render a template with sample data. Returns (subject, html, error).
+
+    template defaults to what the job would send today; pass one to
+    preview unsaved edits.
+    """
+    template = template or get_template(job_id, kind)
+    values = build_substitutions(kind, get_job_branding(job_id),
+                                 job_name=job_name, **SAMPLE_VALUES)
+    return render_email(template, values)
+
+
+def send_test_email(job_id, job_name, kind, to_address, template=None):
+    """Send a sample-data rendering of a template to an admin."""
+    subject, body, error = render_sample(job_id, job_name, kind, template)
+    if error:
+        return False, error
+    branding = get_job_branding(job_id)
+    return send_raw_email(
+        mail_to=to_address,
+        subject=f'[TEST] {subject}',
+        html_content=body,
+        reply_to=[branding['reply_to']],
+        company_name=branding['company_name'],
+    )
 
 
 # MessageId of the most recent successful send. Read immediately after
@@ -173,35 +336,24 @@ def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=N
 
 def send_booking_confirmation(candidate_name, candidate_email, job_name,
                                slot_date, day_of_week, start_time, end_time,
-                               interview_link_with_expiry, company_name=None,
+                               interview_link_with_expiry, job_id=None,
                                duration_minutes=None):
     """
     Send a booking confirmation email to a candidate after they book a slot.
 
-    Every candidate-visible value is substituted into the template; nothing
-    about the slot is hardcoded in the HTML.
+    The subject, body, sender name, reply-to and CC all come from the
+    job's configuration, falling back to the defaults.
 
     Returns: (success: bool, error_message: str | None)
     """
-    effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
-    reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
-    duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
-    subject = (f"{effective_company} Campus Hiring: Your AI Interview Link "
-               f"for {job_name} Role")
+    branding = get_job_branding(job_id)
+    values = build_substitutions(
+        'confirmation', branding, candidate_name, candidate_email, job_name,
+        slot_date, day_of_week, start_time, end_time,
+        interview_link_with_expiry, duration_minutes=duration_minutes)
 
-    html_content, error = _render(CONFIRMATION_EMAIL_TEMPLATE, (
-        ('{{Candidate Name}}', candidate_name),
-        ('{{Job Name}}', job_name),
-        ('{{Slot Date}}', f'{day_of_week}, {slot_date}'),
-        ('{{Start Time}}', start_time),
-        ('{{End Time}}', end_time),
-        ('{{Duration}}', duration_text),
-        # The template calls the join link the "Assessment Link"; the older
-        # name is kept so a reverted template still renders.
-        ('{{Assessment Link}}', interview_link_with_expiry),
-        ('{{Unique Interview Link}}', interview_link_with_expiry),
-        ('{{FAQ Document Link}}', FAQ_DOCUMENT_LINK),
-    ))
+    subject, html_content, error = render_email(
+        get_template(job_id, 'confirmation'), values)
     if error:
         return False, error
 
@@ -209,16 +361,16 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
         mail_to=candidate_email,
         subject=subject,
         html_content=html_content,
-        reply_to=[reply_to_addr],
-        company_name=effective_company,
-        cc=_confirmation_cc(),
+        reply_to=[branding['reply_to']],
+        company_name=branding['company_name'],
+        cc=branding['cc'],
     )
 
 
 def send_slot_reminder(candidate_name, candidate_email, job_name,
                        slot_date, day_of_week, start_time, end_time,
                        interview_link_with_expiry, minutes_until,
-                       company_name=None, duration_minutes=None):
+                       job_id=None, duration_minutes=None):
     """Send the shortly-before-your-slot reminder to a candidate.
 
     minutes_until is the rounded gap between now and the slot start, so
@@ -227,26 +379,15 @@ def send_slot_reminder(candidate_name, candidate_email, job_name,
 
     Returns: (success: bool, error_message: str | None)
     """
-    effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
-    reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
-    duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
-    # The slot time stays in the subject: the instructions-only body no
-    # longer repeats it, so this is the candidate's only reminder of
-    # when they are due.
-    subject = (f"Reminder - {effective_company} AI Round 1 Interview at {start_time} IST "
-               f"({slot_date}) – Important Instructions")
+    branding = get_job_branding(job_id)
+    values = build_substitutions(
+        'reminder', branding, candidate_name, candidate_email, job_name,
+        slot_date, day_of_week, start_time, end_time,
+        interview_link_with_expiry, duration_minutes=duration_minutes,
+        minutes_until=minutes_until)
 
-    html_content, error = _render(REMINDER_EMAIL_TEMPLATE, (
-        ('{{Candidate Name}}', candidate_name),
-        ('{{Job Name}}', job_name),
-        ('{{Slot Date}}', f'{day_of_week}, {slot_date}'),
-        ('{{Start Time}}', start_time),
-        ('{{End Time}}', end_time),
-        ('{{Duration}}', duration_text),
-        ('{{Minutes Until}}', str(minutes_until)),
-        ('{{Assessment Link}}', interview_link_with_expiry),
-        ('{{FAQ Document Link}}', FAQ_DOCUMENT_LINK),
-    ))
+    subject, html_content, error = render_email(
+        get_template(job_id, 'reminder'), values)
     if error:
         return False, error
 
@@ -254,6 +395,6 @@ def send_slot_reminder(candidate_name, candidate_email, job_name,
         mail_to=candidate_email,
         subject=subject,
         html_content=html_content,
-        reply_to=[reply_to_addr],
-        company_name=effective_company,
+        reply_to=[branding['reply_to']],
+        company_name=branding['company_name'],
     )

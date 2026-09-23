@@ -1,138 +1,130 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 
-{% block title %}All Candidates{% endblock %}
+{% block page_title %}Candidates{% endblock %}
+{% block page_subtitle %}Everyone uploaded for a job, their booking status and personal booking link.{% endblock %}
+{% block page_actions %}
+<form method="GET" action="/admin/candidates" class="d-flex">
+    <select name="job_id" class="form-select" onchange="this.form.submit()" aria-label="Filter by job">
+        <option value="">All Jobs</option>
+        {% for jid, jname in jobs.items() %}
+        <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
+        {% endfor %}
+    </select>
+</form>
+<a href="/admin/upload" class="btn btn-primary text-nowrap">
+    <i class="bi bi-upload"></i> Upload Candidates
+</a>
+{% endblock %}
 
-{% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>All Candidates</h2>
-            <div>
-                <a href="/admin/upload" class="btn btn-success me-2">
-                    <i class="bi bi-upload"></i> Upload Candidates
-                </a>
-                <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
-            </div>
-        </div>
+{% block admin_content %}
+<!-- Status Filter -->
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div class="segmented" role="group" aria-label="Filter by status">
+        <button type="button" class="btn filter-btn active" data-status="all">
+            All <span class="count">{{ candidates|length }}</span>
+        </button>
+        <button type="button" class="btn filter-btn" data-status="pending">
+            <span class="legend-dot dot-pending"></span>Pending <span class="count">{{ candidates|selectattr('status', 'equalto', 'pending')|list|length }}</span>
+        </button>
+        <button type="button" class="btn filter-btn" data-status="clicked">
+            <span class="legend-dot dot-clicked"></span>Clicked <span class="count">{{ candidates|selectattr('status', 'equalto', 'clicked')|list|length }}</span>
+        </button>
+        <button type="button" class="btn filter-btn" data-status="booked">
+            <span class="legend-dot dot-booked"></span>Booked <span class="count">{{ candidates|selectattr('status', 'equalto', 'booked')|list|length }}</span>
+        </button>
     </div>
 </div>
 
-<!-- Status Filter Cards -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="btn-group" role="group" aria-label="Filter by status">
-            <button type="button" class="btn btn-outline-secondary filter-btn active" data-status="all">
-                All ({{ candidates|length }})
-            </button>
-            <button type="button" class="btn btn-outline-info filter-btn" data-status="pending">
-                Pending ({{ candidates|selectattr('status', 'equalto', 'pending')|list|length }})
-            </button>
-            <button type="button" class="btn btn-outline-warning filter-btn" data-status="clicked">
-                Clicked ({{ candidates|selectattr('status', 'equalto', 'clicked')|list|length }})
-            </button>
-            <button type="button" class="btn btn-outline-success filter-btn" data-status="booked">
-                Booked ({{ candidates|selectattr('status', 'equalto', 'booked')|list|length }})
-            </button>
-        </div>
+<div class="card table-card">
+    {% if candidates %}
+    <div class="table-responsive table-scroll">
+        <table class="table table-hover table-modern" id="candidatesTable">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Job Position</th>
+                    <th>Status</th>
+                    <th>Candidate ID</th>
+                    <th>AI Discussion Link</th>
+                    <th>Slot Booking Link</th>
+                    <th>Created At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for candidate in candidates %}
+                <tr data-status="{{ candidate.status }}">
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td class="cell-strong">{{ candidate.name }}</td>
+                    <td>{{ candidate.email }}</td>
+                    <td>
+                        {# Phone is optional -- it is only needed
+                           for the reminder call. #}
+                        {% if candidate.phone %}
+                            <span class="font-monospace small">{{ candidate.phone }}</span>
+                        {% else %}
+                            <span class="text-muted" title="No phone number on record; this candidate cannot be called">&mdash;</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ candidate.job_name }}</td>
+                    <td>
+                        {% if candidate.status in ['pending', 'clicked', 'booked'] %}
+                            <span class="status-pill status-{{ candidate.status }}">{{ candidate.status|capitalize }}</span>
+                        {% else %}
+                            <span class="status-pill pill-neutral">{{ candidate.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="id-mono" title="{{ candidate.candidate_id }}">{{ candidate.candidate_id[:8] }}...</span>
+                    </td>
+                    <td>
+                        {% if candidate.interview_link %}
+                        <a href="{{ candidate.interview_link }}" target="_blank" class="btn btn-sm btn-outline-primary text-nowrap" title="{{ candidate.interview_link }}">
+                            <i class="bi bi-link-45deg"></i> View Link
+                        </a>
+                        {% else %}
+                        <span class="text-muted">N/A</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {# The link the candidate uses to pick a slot. #}
+                        {% set booking_link = request.host_url.rstrip('/')
+                            ~ '/book?candidate_id=' ~ candidate.candidate_id
+                            ~ '&job_id=' ~ candidate.job_id %}
+                        <div class="d-flex gap-1">
+                            <a href="{{ booking_link }}" target="_blank"
+                               class="btn btn-sm btn-outline-success text-nowrap"
+                               title="{{ booking_link }}">
+                                <i class="bi bi-calendar-check"></i> Open
+                            </a>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary copy-link-btn"
+                                    data-link="{{ booking_link }}"
+                                    title="Copy booking link">
+                                <i class="bi bi-clipboard"></i>
+                            </button>
+                        </div>
+                    </td>
+                    <td class="text-nowrap small">{{ candidate.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
-</div>
-
-<div class="row">
-    <div class="col-12">
-        <div class="card shadow">
-            <div class="card-body">
-                {% if candidates %}
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover" id="candidatesTable">
-                        <thead class="table-dark">
-                            <tr>
-                                <th>#</th>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Phone</th>
-                                <th>Job Position</th>
-                                <th>Status</th>
-                                <th>Candidate ID</th>
-                                <th>AI Discussion Link</th>
-                                <th>Slot Booking Link</th>
-                                <th>Created At</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for candidate in candidates %}
-                            <tr data-status="{{ candidate.status }}">
-                                <td>{{ loop.index }}</td>
-                                <td>{{ candidate.name }}</td>
-                                <td>{{ candidate.email }}</td>
-                                <td>
-                                    {# Phone is optional -- it is only needed
-                                       for the reminder call. #}
-                                    {% if candidate.phone %}
-                                        <span class="font-monospace">{{ candidate.phone }}</span>
-                                    {% else %}
-                                        <span class="text-muted" title="No phone number on record; this candidate cannot be called">&mdash;</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ candidate.job_name }}</td>
-                                <td>
-                                    {% if candidate.status == 'pending' %}
-                                        <span class="badge bg-info">Pending</span>
-                                    {% elif candidate.status == 'clicked' %}
-                                        <span class="badge bg-warning text-dark">Clicked</span>
-                                    {% elif candidate.status == 'booked' %}
-                                        <span class="badge bg-success">Booked</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">{{ candidate.status }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <small class="text-muted font-monospace">{{ candidate.candidate_id[:8] }}...</small>
-                                </td>
-                                <td>
-                                    {% if candidate.interview_link %}
-                                    <a href="{{ candidate.interview_link }}" target="_blank" class="btn btn-sm btn-outline-primary" title="{{ candidate.interview_link }}">
-                                        <i class="bi bi-link-45deg"></i> View Link
-                                    </a>
-                                    {% else %}
-                                    <span class="text-muted">N/A</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {# The link the candidate uses to pick a slot. #}
-                                    {% set booking_link = request.host_url.rstrip('/')
-                                        ~ '/book?candidate_id=' ~ candidate.candidate_id
-                                        ~ '&job_id=' ~ candidate.job_id %}
-                                    <div class="d-flex gap-1">
-                                        <a href="{{ booking_link }}" target="_blank"
-                                           class="btn btn-sm btn-outline-success"
-                                           title="{{ booking_link }}">
-                                            <i class="bi bi-calendar-check"></i> Open
-                                        </a>
-                                        <button type="button"
-                                                class="btn btn-sm btn-outline-secondary copy-link-btn"
-                                                data-link="{{ booking_link }}"
-                                                title="Copy booking link">
-                                            <i class="bi bi-clipboard"></i>
-                                        </button>
-                                    </div>
-                                </td>
-                                <td>{{ candidate.created_at }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <p class="text-muted mt-3">Total candidates: <span id="totalCount">{{ candidates|length }}</span></p>
-                {% else %}
-                <div class="alert alert-info">
-                    No candidates found. <a href="/admin/upload">Upload candidates</a> to get started.
-                </div>
-                {% endif %}
-            </div>
-        </div>
+    <p class="table-footer">Total candidates: <span id="totalCount">{{ candidates|length }}</span></p>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-people"></i></div>
+        <h5>No candidates found.</h5>
+        <p><a href="/admin/upload">Upload candidates</a> to get started.</p>
     </div>
+    {% endif %}
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
 // Filter functionality
 document.addEventListener('DOMContentLoaded', function() {

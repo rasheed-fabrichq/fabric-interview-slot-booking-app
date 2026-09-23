@@ -13,7 +13,7 @@ Configure in .env:
     CALLER_API_KEY        optional; sent as Authorization if set
     CALLER_ASSISTANT_ID   the assistant to run
     CALLER_AGENT_NAME     the voice agent's name, e.g. Riya
-    CALLER_COMPANY_NAME   the client, e.g. Meesho
+    CALLER_COMPANY_NAME   default spoken company; jobs override it
     CALL_DISQUALIFICATION_RATE  spoken rate, e.g. "eighty percent"
     CALLER_PHONE_FORMAT   'national' (default) or 'e164'
 """
@@ -43,7 +43,7 @@ CALL_SETTINGS = {
     'assistant_id': ('CALLER_ASSISTANT_ID', ''),
     'agent_type': ('CALLER_AGENT_TYPE', 'integrity_reminder'),
     'agent_name': ('CALLER_AGENT_NAME', 'Riya'),
-    'company_name': ('CALLER_COMPANY_NAME', 'Meesho'),
+    'company_name': ('CALLER_COMPANY_NAME', 'Fabric'),
     'disqualification_rate': ('CALL_DISQUALIFICATION_RATE', 'eighty percent'),
     'api_base_url': ('CALLER_API_BASE_URL', 'http://localhost:8000'),
 }
