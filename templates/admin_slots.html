@@ -21,6 +21,14 @@
 <a href="/admin/init-slots" class="btn btn-outline-secondary"><i class="bi bi-lightning-charge"></i> Initialize Slots</a>
 {% endblock %}
 
+{% block extra_css %}
+<style>
+    .hold-slot { width: 7.5rem; flex-wrap: nowrap; }
+    .hold-day { width: auto; flex-wrap: nowrap; }
+    .hold-day .form-control { width: 4.5rem; }
+</style>
+{% endblock %}
+
 {% block admin_content %}
 {% include "_admin_alerts.html" %}
 {% if dates_data %}
@@ -72,12 +80,21 @@
             <span class="card-title-icon"><i class="bi bi-calendar-event"></i></span>
             <div class="me-auto">
                 <h5>{{ date_data.day_of_week }}, {{ date_data.date }}</h5>
-                <p class="card-subtitle-text">{{ date_data.total_booked }} / {{ date_data.total_capacity }} booked</p>
+                <p class="card-subtitle-text">{{ date_data.total_booked }} / {{ date_data.total_capacity }} booked{% if date_data.total_held %} · {{ date_data.total_held }} held{% endif %}</p>
             </div>
             <div class="util-bar text-end">
                 <div class="small fw-semibold mb-1">{{ "%.1f"|format(utilization) }}% utilization</div>
                 <div class="progress"><div class="progress-bar bg-primary" style="width: {{ utilization }}%"></div></div>
             </div>
+            <form method="POST" action="{{ url_for('admin_hold_seats') }}" class="input-group input-group-sm hold-day ms-2"
+                  title="Hold back this many seats in every slot on {{ date_data.date }} (0 releases them)">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="job_id" value="{{ selected_job }}">
+                <input type="hidden" name="date" value="{{ date_data.date }}">
+                <span class="input-group-text">Hold per slot</span>
+                <input type="number" name="seats" class="form-control" min="0" value="0" aria-label="Seats to hold in every slot on {{ date_data.date }}">
+                <button type="submit" class="btn btn-outline-secondary">Apply</button>
+            </form>
             {% set all_blocked = date_data.slots|selectattr('blocked')|list|length == date_data.slots|length %}
             <form method="POST" action="{{ url_for('admin_block_slots') }}" class="ms-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -98,6 +115,7 @@
                         <th>Booked Count</th>
                         <th>Available</th>
                         <th>Capacity</th>
+                        <th title="Seats held back from candidates">Held</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -109,14 +127,24 @@
                         <td>{{ slot.available }}</td>
                         <td class="text-muted">{{ slot.max_capacity }}</td>
                         <td>
+                            <form method="POST" action="{{ url_for('admin_hold_seats') }}" class="input-group input-group-sm hold-slot">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="job_id" value="{{ selected_job }}">
+                                <input type="hidden" name="slot_id" value="{{ slot.id }}">
+                                <input type="number" name="seats" class="form-control" min="0" max="{{ slot.max_capacity - slot.booked_count }}"
+                                       value="{{ slot.held_seats }}" aria-label="Seats held at {{ slot.start_time }}">
+                                <button type="submit" class="btn btn-outline-secondary" title="Save held seats for {{ slot.start_time }}"><i class="bi bi-check2"></i></button>
+                            </form>
+                        </td>
+                        <td>
                           <div class="d-flex align-items-center justify-content-between gap-2">
                             <span>
                             {% if slot.blocked %}
                                 <span class="status-pill pill-danger no-dot" title="Hidden from candidates"><i class="bi bi-lock-fill"></i> Blocked</span>
-                            {% elif slot.booked_count == 0 %}
-                                <span class="status-pill pill-neutral">Empty</span>
                             {% elif slot.available == 0 %}
                                 <span class="status-pill pill-danger">Full</span>
+                            {% elif slot.booked_count == 0 and not slot.held_seats %}
+                                <span class="status-pill pill-neutral">Empty</span>
                             {% elif slot.available <= 3 %}
                                 <span class="status-pill pill-warning">Almost Full</span>
                             {% else %}
@@ -142,8 +170,9 @@
                     <tr>
                         <td><strong>Date Total:</strong></td>
                         <td><strong>{{ date_data.total_booked }}</strong></td>
-                        <td><strong>{{ date_data.total_capacity - date_data.total_booked }}</strong></td>
+                        <td><strong>{{ [date_data.total_capacity - date_data.total_booked - date_data.total_held, 0]|max }}</strong></td>
                         <td><strong>{{ date_data.total_capacity }}</strong></td>
+                        <td><strong>{{ date_data.total_held }}</strong></td>
                         <td><span class="status-pill pill-primary no-dot">{{ "%.1f"|format(utilization) }}%</span></td>
                     </tr>
                 </tfoot>

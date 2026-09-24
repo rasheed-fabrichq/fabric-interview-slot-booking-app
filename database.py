@@ -181,6 +181,9 @@ def init_database():
             start_time TEXT NOT NULL,
             booked_count INTEGER DEFAULT 0,
             blocked INTEGER NOT NULL DEFAULT 0,  -- 1: hidden from candidates
+            -- Seats the admin holds back from candidates. Bookable seats
+            -- are capacity_per_slot - booked_count - held_seats.
+            held_seats INTEGER NOT NULL DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(job_id, date, start_time),
             FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
@@ -1340,9 +1343,12 @@ def get_slots_by_job_and_date(job_id, date, include_past=False):
     max_capacity = config['capacity_per_slot']
 
     cursor.execute('''
-        SELECT id, job_id, date, day_of_week, start_time, booked_count,
+        SELECT id, job_id, date, day_of_week, start_time,
+               -- Held seats are reported as taken, so candidates see
+               -- fewer free seats rather than that seats are held.
+               booked_count + held_seats as booked_count,
                ? as max_capacity,
-               (? - booked_count) as available
+               MAX(0, ? - booked_count - held_seats) as available
         FROM slots
         WHERE job_id = ? AND date = ? AND blocked = 0
         ORDER BY start_time
@@ -1381,9 +1387,9 @@ def get_all_slots_for_job(job_id):
     cursor.execute('''
         SELECT id, job_id, date, day_of_week, start_time, booked_count,
                ? as max_capacity,
-               (? - booked_count) as available,
+               MAX(0, ? - booked_count - held_seats) as available,
                ? as slot_duration_minutes,
-               blocked
+               blocked, held_seats
         FROM slots
         WHERE job_id = ?
         ORDER BY date, start_time
@@ -1417,6 +1423,48 @@ def set_slots_blocked(job_id, blocked, slot_id=None, date=None):
     conn.commit()
     conn.close()
     return cursor.rowcount
+
+
+def set_held_seats(job_id, seats, slot_id=None, date=None):
+    """Hold back seats from candidates in one slot, or every slot on a date.
+
+    Held seats are never offered to candidates. The number is capped per
+    slot at what is still free (capacity minus bookings), since seats
+    already booked cannot be held. 0 releases them.
+
+    Returns {'changed': n, 'capped': m} -- m slots got fewer held seats
+    than asked for because they did not have that many free.
+    """
+    if slot_id is None and date is None:
+        raise ValueError('Pass slot_id or date')
+    seats = max(0, int(seats))
+    with get_db_transaction() as conn:
+        capacity = conn.execute(
+            'SELECT capacity_per_slot FROM job_configs WHERE job_id = ?',
+            (job_id,)).fetchone()
+        if not capacity:
+            return {'changed': 0, 'capped': 0}
+        capacity = capacity[0]
+
+        query = 'SELECT id, booked_count FROM slots WHERE job_id = ?'
+        params = [job_id]
+        if slot_id is not None:
+            query += ' AND id = ?'
+            params.append(slot_id)
+        else:
+            query += ' AND date = ?'
+            params.append(date)
+
+        changed = capped = 0
+        for slot in conn.execute(query, params).fetchall():
+            free = max(0, capacity - slot['booked_count'])
+            held = min(seats, free)
+            if held < seats:
+                capped += 1
+            conn.execute('UPDATE slots SET held_seats = ? WHERE id = ?',
+                         (held, slot['id']))
+            changed += 1
+    return {'changed': changed, 'capped': capped}
 
 
 def clear_slots_for_job(job_id):
@@ -1485,7 +1533,8 @@ def book_slot(candidate_id, job_id, slot_id):
 
             # Get slot details with lock
             cursor.execute('''
-                SELECT id, booked_count, start_time, date, job_id, blocked
+                SELECT id, booked_count, start_time, date, job_id, blocked,
+                       held_seats
                 FROM slots
                 WHERE id = ?
             ''', (slot_id,))
@@ -1521,7 +1570,7 @@ def book_slot(candidate_id, job_id, slot_id):
             max_capacity = config['capacity_per_slot']
 
             # Check availability
-            if slot['booked_count'] >= max_capacity:
+            if slot['booked_count'] + slot['held_seats'] >= max_capacity:
                 return {'error': 'This slot has just been booked by other candidates. Please choose another available slot.'}
 
             # Increment booked count

@@ -45,6 +45,7 @@ from database import (
     get_followup_runs, FOLLOWUP_AUDIENCES,
     get_job_usage, delete_job, delete_candidates,
     get_job_title, rename_job, set_slots_blocked, count_bookings_on_date,
+    set_held_seats,
 )
 from job_call_settings import update_job_call_config, get_job_call_config
 from caller_utils import get_recording_url
@@ -1772,11 +1773,13 @@ def admin_slots():
                 'day_of_week': slot['day_of_week'],
                 'slots': [],
                 'total_capacity': 0,
+                'total_held': 0,
                 'total_booked': 0
             }
         slots_by_date[date]['slots'].append(slot)
         slots_by_date[date]['total_capacity'] += slot['max_capacity']
         slots_by_date[date]['total_booked'] += slot['booked_count']
+        slots_by_date[date]['total_held'] += slot['held_seats']
 
     # Convert to sorted list
     dates_data = sorted(slots_by_date.values(), key=lambda x: x['date'])
@@ -1786,7 +1789,8 @@ def admin_slots():
                          jobs=get_jobs(),
                          selected_job=job_id,
                          job_name=get_job_name(job_id),
-                         success=request.args.get('msg'))
+                         success=request.args.get('msg'),
+                         error=request.args.get('error'))
 
 
 @app.route('/admin/slots/block', methods=['POST'])
@@ -1806,6 +1810,31 @@ def admin_block_slots():
     return redirect(url_for('admin_slots', job_id=job_id,
                             msg=f'{"Blocked" if blocked else "Unblocked"} '
                                 f'{changed} slot(s)'))
+
+
+@app.route('/admin/slots/hold', methods=['POST'])
+@admin_required
+def admin_hold_seats():
+    """Hold back some seats in a slot, or in every slot on a date."""
+    job_id = request.form.get('job_id')
+    if not is_valid_job_id(job_id):
+        return redirect(url_for('admin_dashboard'))
+    seats = request.form.get('seats', type=int)
+    slot_id = request.form.get('slot_id', type=int)
+    date = request.form.get('date') or None
+    if seats is None or seats < 0 or (slot_id is None and not date):
+        return redirect(url_for('admin_slots', job_id=job_id,
+                                error='Enter a number of seats (0 or more)'))
+
+    result = set_held_seats(job_id, seats, slot_id=slot_id,
+                            date=None if slot_id is not None else date)
+    where = 'the slot' if slot_id is not None else f'{result["changed"]} slot(s) on {date}'
+    msg = (f'Released held seats in {where}' if seats == 0
+           else f'Holding {seats} seat(s) in {where}')
+    if result['capped']:
+        msg += (f'. {result["capped"]} slot(s) had fewer free seats, so '
+                f'they hold only what was free')
+    return redirect(url_for('admin_slots', job_id=job_id, msg=msg + '.'))
 
 
 @app.route('/admin/jobs', methods=['GET', 'POST'])

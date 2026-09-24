@@ -83,6 +83,7 @@ https://slot-booking.fabrichq.ai/book?candidate_id=<CANDIDATE_UUID>&job_id=<JOB_
 
 ### 10. Slot blocking, date deletion, candidate management
 - Admin > Slots: block or unblock a single slot or a whole day (`slots.blocked`). Blocked slots are hidden from candidates and rejected by `book_slot`. Existing bookings on a blocked slot are kept.
+- Admin > Slots: **hold seats** in a slot (`slots.held_seats`), or apply the same number to every slot on a day. Candidates can book `capacity - booked - held` seats. The candidate API reports held seats as booked, so candidates never see that seats are held. The number held is capped at the seats still free, and 0 releases them.
 - Deleting an interview date cancels the bookings on it. Those candidates go back to `clicked` so they can rebook, and their reminder claims are cleared.
 - Candidates page: filter by job, text search (name/email/phone/ID), phone filter, status filter, and delete one or many candidates (booked seats are freed). Jobs page: rename, add batch, and delete (needs confirmation when candidates have booked).
 - The confirmation email is sent `EMAIL_CONFIRMATION_DELAY_SECONDS` after booking (default 10).
