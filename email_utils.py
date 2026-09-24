@@ -148,10 +148,10 @@ def get_job_branding(job_id):
         'company_name': job.get('company_name') or None,
         'reply_to': (job.get('email_reply_to')
                      or _cfg('EMAIL_REPLY_TO', DEFAULT_SUPPORT_EMAIL)),
-        # CC falls back to env only when the job has never set one; a
-        # job can't clear an env CC except by setting its own.
-        'cc': _split_addresses(job.get('email_cc')
-                               or _cfg('EMAIL_CONFIRMATION_CC', '')),
+        # CC only ever comes from the job itself. Falling back to a
+        # global list would copy one client's panel on another client's
+        # candidates.
+        'cc': _split_addresses(job.get('email_cc')),
         'support_email': (job.get('support_email')
                           or _cfg('EMAIL_REPLY_TO', DEFAULT_SUPPORT_EMAIL)),
         'faq_link': (job.get('faq_link')
@@ -247,7 +247,7 @@ SAMPLE_VALUES = {
     'interview_link': 'https://app.fabrichq.ai/interview/sample/?candidate_id=sample',
     'duration_minutes': 30,
     'minutes_until': 15,
-    'booking_link': 'https://slot-booking.fabrichq.ai/book?candidate_id=sample&job_id=sample',
+    'booking_link': None,  # filled from BOOKING_BASE_URL at render time
 }
 
 
@@ -261,8 +261,14 @@ def render_sample(job_id, job_name, kind, template=None):
     branding = get_job_branding(job_id)
     if not branding['company_name']:
         return None, None, MISSING_COMPANY_ERROR
+    sample = dict(SAMPLE_VALUES)
+    base = _cfg('BOOKING_BASE_URL', '').strip() or 'https://slot-booking.fabrichq.ai'
+    if not base.startswith(('http://', 'https://')):
+        base = 'https://' + base
+    sample['booking_link'] = (f"{base.rstrip('/')}/book"
+                              f"?candidate_id=sample&job_id=sample")
     values = build_substitutions(kind, branding,
-                                 job_name=job_name, **SAMPLE_VALUES)
+                                 job_name=job_name, **sample)
     return render_email(template, values)
 
 

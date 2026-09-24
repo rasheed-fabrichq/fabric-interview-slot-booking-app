@@ -75,8 +75,14 @@
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="job_id" value="{{ job_id }}">
                                     <input type="hidden" name="date" value="{{ date_info.date }}">
+                                    {% if date_info.booked %}
+                                    {% set del_msg = 'Delete ' ~ date_info.date ~ '?\n\n' ~ date_info.booked ~ ' candidate(s) have booked a slot on this date. Their bookings will be cancelled (they are not notified) and they can pick another date with their booking link.\n\nAll slots on this date will be deleted.' %}
+                                    {% else %}
+                                    {% set del_msg = 'Delete ' ~ date_info.date ~ '? All slots on this date will be deleted.' %}
+                                    {% endif %}
+                                    {% if date_info.booked %}<span class="status-pill pill-warning no-dot me-1" title="Candidates booked on this date">{{ date_info.booked }} booked</span>{% endif %}
                                     <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete date"
-                                            onclick="return confirm('Delete this date? This will also delete all slots for this date.')">
+                                            onclick="return confirm({{ del_msg|tojson|forceescape }})">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </form>

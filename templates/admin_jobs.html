@@ -3,11 +3,21 @@
 {% block page_title %}Jobs{% endblock %}
 {% block page_subtitle %}Create new job positions and view existing jobs.{% endblock %}
 
+{% macro rename_button(job) %}
+<button type="button" class="btn btn-sm btn-outline-secondary"
+        data-bs-toggle="modal" data-bs-target="#renameJobModal"
+        data-job-id="{{ job.job_id }}" data-job-name="{{ job.job_name }}"
+        data-batch-name="{{ job.batch_name or '' }}" data-is-batch="{{ 1 if job.parent_job_id else 0 }}"
+        title="Rename" aria-label="Rename {{ job.job_name }}{% if job.batch_name %} – {{ job.batch_name }}{% endif %}">
+    <i class="bi bi-pencil"></i>
+</button>
+{% endmacro %}
+
 {% macro delete_button(job) %}
 {% set u = usage.get(job.job_id, {}) %}
 <button type="button" class="btn btn-sm btn-outline-danger js-delete-job"
         data-bs-toggle="modal" data-bs-target="#deleteJobModal"
-        data-job-id="{{ job.job_id }}" data-job-name="{{ job.job_name }}"
+        data-job-id="{{ job.job_id }}" data-job-name="{{ job.job_name }}{% if job.batch_name %} – {{ job.batch_name }}{% endif %}"
         data-candidates="{{ u.candidates or 0 }}" data-bookings="{{ u.bookings or 0 }}"
         data-slots="{{ u.slots or 0 }}" data-dates="{{ u.dates or 0 }}" data-batches="{{ u.batches or 0 }}"
         title="Delete {{ job.job_name }}" aria-label="Delete {{ job.job_name }}">
@@ -127,6 +137,7 @@
                         <div class="min-w-0">
                             <div class="fw-semibold">
                                 {{ job.job_name }}
+                                {% if job.batch_name %}<span class="text-muted fw-normal">– {{ job.batch_name }}</span>{% endif %}
                                 {% if batches %}<span class="status-pill pill-info no-dot ms-1">{{ batches|length + 1 }} batches</span>{% endif %}
                             </div>
                             <div class="id-mono" title="Link ID: the ID in candidates' links and booking links">{{ job.link_id }}</div>
@@ -137,6 +148,7 @@
                                     aria-expanded="false" aria-controls="batch-form-{{ loop.index }}">
                                 <i class="bi bi-diagram-2"></i> Add batch
                             </button>
+                            {{ rename_button(job) }}
                             {{ delete_button(job) }}
                         </div>
                     </div>
@@ -146,15 +158,16 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="action" value="add_batch">
                             <input type="hidden" name="parent_job_id" value="{{ job.job_id }}">
-                            <label class="form-label fw-semibold" for="batch-name-{{ loop.index }}">Batch name</label>
+                            <label class="form-label fw-semibold" for="batch-name-{{ loop.index }}">Batch label</label>
                             <div class="input-group">
                                 <input type="text" class="form-control" id="batch-name-{{ loop.index }}" name="batch_name"
-                                       value="{{ job.job_name }} – Batch {{ batches|length + 2 }}" required>
+                                       value="Batch {{ batches|length + 2 }}" placeholder="e.g. Saturday" required>
                                 <button type="submit" class="btn btn-primary">Create batch</button>
                             </div>
                             <div class="form-hint mt-2">
-                                Copies slot settings, branding, email templates and reminder settings.
-                                Dates are not copied. Candidates keep the same link format and booking link;
+                                The label is for you only; candidates still see the job name
+                                "{{ job.job_name }}". Copies slot settings, branding, email templates
+                                and reminder settings. Dates are not copied. Candidates keep the same link format and booking link;
                                 each is routed to the batch they were uploaded into.
                             </div>
                         </form>
@@ -165,8 +178,9 @@
                         {% for b in batches %}
                         <li class="py-1 d-flex align-items-center gap-1">
                             <i class="bi bi-arrow-return-right text-muted"></i>
-                            <span class="fw-medium">{{ b.job_name }}</span>
+                            <span class="fw-medium">{{ b.batch_name }}</span>
                             <span class="status-pill pill-neutral no-dot ms-1 me-auto">Batch</span>
+                            {{ rename_button(b) }}
                             {{ delete_button(b) }}
                         </li>
                         {% endfor %}
@@ -208,6 +222,33 @@
                 </ul>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Rename job -->
+<div class="modal fade" id="renameJobModal" tabindex="-1" aria-labelledby="renameJobModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="POST" action="{{ url_for('admin_jobs') }}" class="modal-content">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="rename_job">
+            <input type="hidden" name="job_id" id="rename-job-id">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="renameJobModalLabel">Rename job</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label fw-semibold" for="rename-job-name">Job name</label>
+                <input type="text" class="form-control" name="job_name" id="rename-job-name" required>
+                <div class="form-hint mb-3">What candidates see on the booking page and in emails. Shared by all batches of this job.</div>
+                <label class="form-label fw-semibold" for="rename-batch-name">Batch label <span class="text-muted fw-normal" id="rename-batch-optional">(optional)</span></label>
+                <input type="text" class="form-control" name="batch_name" id="rename-batch-name" placeholder="e.g. Friday">
+                <div class="form-hint">Admin only; tells this job's batches apart.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> Save</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -258,6 +299,17 @@
 {% block extra_js %}
 <script>
 (function () {
+    document.getElementById('renameJobModal').addEventListener('show.bs.modal', function (event) {
+        const d = event.relatedTarget.dataset;
+        const isBatch = d.isBatch === '1';
+        document.getElementById('rename-job-id').value = d.jobId;
+        document.getElementById('rename-job-name').value = d.jobName;
+        const batch = document.getElementById('rename-batch-name');
+        batch.value = d.batchName;
+        batch.required = isBatch;
+        document.getElementById('rename-batch-optional').textContent = isBatch ? '' : '(optional)';
+    });
+
     const modal = document.getElementById('deleteJobModal');
     const confirmBox = document.getElementById('confirm-bookings');
     const submit = document.getElementById('delete-job-submit');

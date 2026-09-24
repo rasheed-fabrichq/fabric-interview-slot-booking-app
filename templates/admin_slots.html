@@ -22,6 +22,7 @@
 {% endblock %}
 
 {% block admin_content %}
+{% include "_admin_alerts.html" %}
 {% if dates_data %}
 {% set total_slots_count = namespace(value=0) %}
 {% for date_data in dates_data %}
@@ -65,7 +66,7 @@
 <div class="row g-4">
 {% for date_data in dates_data %}
 {% set utilization = (date_data.total_booked / date_data.total_capacity * 100) if date_data.total_capacity > 0 else 0 %}
-<div class="col-xl-6">
+<div class="col-12">
     <div class="card table-card slot-day-card">
         <div class="card-header">
             <span class="card-title-icon"><i class="bi bi-calendar-event"></i></span>
@@ -77,6 +78,17 @@
                 <div class="small fw-semibold mb-1">{{ "%.1f"|format(utilization) }}% utilization</div>
                 <div class="progress"><div class="progress-bar bg-primary" style="width: {{ utilization }}%"></div></div>
             </div>
+            {% set all_blocked = date_data.slots|selectattr('blocked')|list|length == date_data.slots|length %}
+            <form method="POST" action="{{ url_for('admin_block_slots') }}" class="ms-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="job_id" value="{{ selected_job }}">
+                <input type="hidden" name="date" value="{{ date_data.date }}">
+                <input type="hidden" name="action" value="{{ 'unblock' if all_blocked else 'block' }}">
+                <button type="submit" class="btn btn-sm {{ 'btn-outline-success' if all_blocked else 'btn-outline-secondary' }} text-nowrap"
+                        title="{{ 'Unblock' if all_blocked else 'Block' }} every slot on {{ date_data.date }}">
+                    <i class="bi {{ 'bi-unlock' if all_blocked else 'bi-lock' }}"></i> {{ 'Unblock day' if all_blocked else 'Block day' }}
+                </button>
+            </form>
         </div>
         <div class="table-responsive">
             <table class="table table-hover table-sm table-modern">
@@ -91,13 +103,17 @@
                 </thead>
                 <tbody>
                     {% for slot in date_data.slots %}
-                    <tr>
+                    <tr{% if slot.blocked %} class="table-secondary"{% endif %}>
                         <td class="cell-strong">{{ slot.start_time }}</td>
                         <td>{{ slot.booked_count }}</td>
                         <td>{{ slot.available }}</td>
                         <td class="text-muted">{{ slot.max_capacity }}</td>
                         <td>
-                            {% if slot.booked_count == 0 %}
+                          <div class="d-flex align-items-center justify-content-between gap-2">
+                            <span>
+                            {% if slot.blocked %}
+                                <span class="status-pill pill-danger no-dot" title="Hidden from candidates"><i class="bi bi-lock-fill"></i> Blocked</span>
+                            {% elif slot.booked_count == 0 %}
                                 <span class="status-pill pill-neutral">Empty</span>
                             {% elif slot.available == 0 %}
                                 <span class="status-pill pill-danger">Full</span>
@@ -106,6 +122,18 @@
                             {% else %}
                                 <span class="status-pill pill-success">Available</span>
                             {% endif %}
+                            </span>
+                            <form method="POST" action="{{ url_for('admin_block_slots') }}" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="job_id" value="{{ selected_job }}">
+                                <input type="hidden" name="slot_id" value="{{ slot.id }}">
+                                <input type="hidden" name="action" value="{{ 'unblock' if slot.blocked else 'block' }}">
+                                <button type="submit" class="btn btn-sm {{ 'btn-outline-success' if slot.blocked else 'btn-outline-secondary' }}"
+                                        title="{{ 'Unblock' if slot.blocked else 'Block' }} {{ slot.start_time }}{% if not slot.blocked and slot.booked_count %} (existing bookings are kept){% endif %}">
+                                    <i class="bi {{ 'bi-unlock' if slot.blocked else 'bi-lock' }}"></i>
+                                </button>
+                            </form>
+                          </div>
                         </td>
                     </tr>
                     {% endfor %}

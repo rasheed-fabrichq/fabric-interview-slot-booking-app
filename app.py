@@ -44,6 +44,7 @@ from database import (
     create_followup_run, record_followup_send, finish_followup_run,
     get_followup_runs, FOLLOWUP_AUDIENCES,
     get_job_usage, delete_job, delete_candidates,
+    get_job_title, rename_job, set_slots_blocked, count_bookings_on_date,
 )
 from job_call_settings import update_job_call_config, get_job_call_config
 from caller_utils import get_recording_url
@@ -62,7 +63,7 @@ from phone_utils import normalize_phone
 # Override with EMAIL_CONFIRMATION_DELAY_SECONDS in .env; 0 sends
 # immediately. Note the send runs on a daemon thread, so a longer delay
 # means a restart within that window drops the email.
-DEFAULT_EMAIL_DELAY_SECONDS = 300
+DEFAULT_EMAIL_DELAY_SECONDS = 10
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-in-production'  # Change this!
@@ -327,7 +328,7 @@ def booking_form():
     # Check if booking is enabled for this specific job
     if not is_booking_enabled_for_job(job_id):
         return render_template('booking_closed.html',
-                             message=f'Booking for {get_job_name(job_id)} is currently closed.',
+                             message=f'Booking for {get_job_title(job_id)} is currently closed.',
                              branding=get_job_branding(job_id))
 
     # Check if already booked for THIS JOB
@@ -369,7 +370,7 @@ def booking_form():
                          candidate=candidate,
                          booking_token=booking_token,
                          job_id=job_id,
-                         job_name=get_job_name(job_id),
+                         job_name=get_job_title(job_id),
                          branding=get_job_branding(job_id))
 
 
@@ -463,7 +464,7 @@ def confirm_booking():
 
     # Security Check 9: Check if booking is enabled for this job
     if not is_booking_enabled_for_job(job_id):
-        return jsonify({'error': f'Booking for {get_job_name(job_id)} has been closed by the administrator.'}), 403
+        return jsonify({'error': f'Booking for {get_job_title(job_id)} has been closed by the administrator.'}), 403
 
     # Mark token as used to prevent reuse
     session['booking_token_used'] = True
@@ -513,7 +514,7 @@ def confirm_booking():
         'message': f'Your interview slot for {start_time_12h} on {start_date_formatted} has been confirmed.',
         'start_time': f"{start_date_formatted} {start_time_12h}",
         'end_time': f"{end_date_formatted} {end_time_12h}",
-        'job_name': get_job_name(job_id)
+        'job_name': get_job_title(job_id)
     })
 
 
@@ -898,10 +899,14 @@ def admin_job_dates():
         elif action == 'delete':
             date = request.form.get('date')  # Format: dd-mm-yyyy
 
-            delete_job_date(job_id, date)
+            result = delete_job_date(job_id, date)
+            removed = result['bookings_removed']
+            note = (f' {removed} booking(s) on it were cancelled; those '
+                    f'candidates can book another date with their link.'
+                    if removed else '')
 
             return render_template('admin_job_dates.html',
-                                 success=f'Date {date} removed from {get_job_name(job_id)}',
+                                 success=f'Date {date} removed from {get_job_name(job_id)}.{note}',
                                  jobs=get_jobs(),
                                  all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
 
@@ -1205,9 +1210,8 @@ def admin_release_booking(candidate_id, job_id):
     print(f"[ADMIN] Released booking for candidate={candidate_id} "
           f"job={job_id} ({result['freed_date']} {result['freed_time']})")
 
-    booking_link = (f"{request.host_url.rstrip('/')}/book"
-                    f"?candidate_id={candidate_id}"
-                    f"&job_id={get_job_config(job_id)['link_id']}")
+    booking_link = booking_link_for(candidate_id,
+                                    get_job_config(job_id)['link_id'])
     return jsonify({
         'success': True,
         'message': (f"Booking released. {result['freed_date']} "
@@ -1290,15 +1294,31 @@ COMMUNICATION_TABS = ('branding', 'confirmation', 'reminder', 'followup',
 FOLLOWUP_SEND_INTERVAL_SECONDS = 0.1
 
 
-def booking_link_for(candidate_id, link_id):
-    """The candidate's slot booking link.
+def booking_base_url():
+    """Public address of this deployment, e.g. https://schedule.fabrichq.ai.
 
-    BOOKING_BASE_URL in .env sets the public domain; without it the
-    address the admin is using is assumed, which is right unless the
-    admin panel is reached through a different host than candidates.
+    Set per deployment with BOOKING_BASE_URL in .env, since each instance
+    is reached on its own domain. Without it, the address the admin
+    panel is being used on is assumed -- wrong if admins reach the app
+    through a different host (an IP, localhost) than candidates do.
     """
-    base = (os.environ.get('BOOKING_BASE_URL') or request.host_url).rstrip('/')
-    return f'{base}/book?candidate_id={candidate_id}&job_id={link_id}'
+    base = (os.environ.get('BOOKING_BASE_URL') or '').strip()
+    if base and not base.startswith(('http://', 'https://')):
+        base = 'https://' + base
+    return (base or request.host_url).rstrip('/')
+
+
+def booking_link_for(candidate_id, link_id):
+    """The candidate's slot booking link, as the Fabric app builds it."""
+    return (f'{booking_base_url()}/book?candidate_id={candidate_id}'
+            f'&job_id={link_id}')
+
+
+@app.context_processor
+def _booking_link_helpers():
+    """Let templates build booking links the same way the code does."""
+    return {'booking_base_url': booking_base_url,
+            'booking_link_for': booking_link_for}
 
 
 def _form_value(field):
@@ -1370,7 +1390,8 @@ def _save_template(job_id, kind):
                       f'Use only the placeholders listed beside the editor.')
 
     save_job_email_template(job_id, kind, subject, body)
-    label = 'Confirmation' if kind == 'confirmation' else 'Reminder'
+    label = {'confirmation': 'Confirmation', 'reminder': 'Reminder',
+             'followup': 'Follow-up'}[kind]
     return f'{label} email saved', None
 
 
@@ -1388,17 +1409,24 @@ def _save_reminder_settings(job_id):
 
 
 def _save_call(job_id):
-    missing = [label for field, label in (('company_name', 'Company name'),
-                                          ('role_name', 'Role'))
-               if not _form_value(field)]
-    if missing:
-        return None, f'{" and ".join(missing)} (spoken) required'
+    calls_enabled = request.form.get('calls_enabled')
+    calls_on = (calls_enabled == 'on' or (
+        calls_enabled == 'inherit' and os.environ.get('CALLS_ENABLED', '')
+        .strip().lower() in ('1', 'true', 'yes', 'on')))
+    # The spoken company and role are only needed if calls will go out;
+    # switching calls off must not demand them.
+    if calls_on:
+        missing = [label for field, label in (('company_name', 'Company name'),
+                                              ('role_name', 'Role'))
+                   if not _form_value(field)]
+        if missing:
+            return None, (f'{" and ".join(missing)} (spoken) required when '
+                          f'calls are on')
 
     lead, error = _positive_int('lead_minutes', 'Call lead time')
     if error:
         return None, error
 
-    calls_enabled = request.form.get('calls_enabled')
     # 'inherit' leaves the column NULL so the env value applies.
     enabled_value = (None if calls_enabled == 'inherit'
                      else (1 if calls_enabled == 'on' else 0))
@@ -1607,7 +1635,7 @@ def admin_communications_preview():
         return jsonify({'error': error}), 400
 
     subject, html_body, error = render_sample(
-        data['job_id'], get_job_name(data['job_id']), data['kind'], template)
+        data['job_id'], get_job_title(data['job_id']), data['kind'], template)
     if error:
         return jsonify({'error': error}), 400
     return jsonify({'subject': subject, 'html': html_body})
@@ -1626,7 +1654,7 @@ def admin_communications_test_email():
     if not is_valid_email(to_address):
         return jsonify({'error': 'Enter a valid email address'}), 400
 
-    ok, error = send_test_email(data['job_id'], get_job_name(data['job_id']),
+    ok, error = send_test_email(data['job_id'], get_job_title(data['job_id']),
                                 data['kind'], to_address, template)
     if not ok:
         return jsonify({'error': error or 'Send failed'}), 502
@@ -1757,7 +1785,27 @@ def admin_slots():
                          dates_data=dates_data,
                          jobs=get_jobs(),
                          selected_job=job_id,
-                         job_name=get_job_name(job_id))
+                         job_name=get_job_name(job_id),
+                         success=request.args.get('msg'))
+
+
+@app.route('/admin/slots/block', methods=['POST'])
+@admin_required
+def admin_block_slots():
+    """Block or unblock a slot, or every slot on a date."""
+    job_id = request.form.get('job_id')
+    if not is_valid_job_id(job_id):
+        return redirect(url_for('admin_dashboard'))
+    blocked = request.form.get('action') == 'block'
+    slot_id = request.form.get('slot_id', type=int)
+    date = request.form.get('date') or None
+    if slot_id is None and not date:
+        return redirect(url_for('admin_slots', job_id=job_id))
+    changed = set_slots_blocked(job_id, blocked, slot_id=slot_id,
+                                date=None if slot_id is not None else date)
+    return redirect(url_for('admin_slots', job_id=job_id,
+                            msg=f'{"Blocked" if blocked else "Unblocked"} '
+                                f'{changed} slot(s)'))
 
 
 @app.route('/admin/jobs', methods=['GET', 'POST'])
@@ -1790,6 +1838,24 @@ def admin_jobs():
                                f'candidate(s), {c["bookings"]} booking(s) '
                                f'and {c["slots"]} slot(s).'))
 
+    if request.method == 'POST' and request.form.get('action') == 'rename_job':
+        job_id = request.form.get('job_id')
+        new_name = (request.form.get('job_name') or '').strip()
+        new_batch = (request.form.get('batch_name') or '').strip() or None
+        if not is_valid_job_id(job_id):
+            return render(error='Job not found')
+        if not new_name:
+            return render(error='Job name is required')
+        job = get_job_config(job_id)
+        if job['parent_job_id'] and not new_batch:
+            return render(error='A batch needs a batch label')
+        label = f'{new_name} – {new_batch}' if new_batch else new_name
+        if any(label == name for jid, name in get_jobs().items()
+               if jid != job_id):
+            return render(error=f'Another job is already called "{label}"')
+        rename_job(job_id, new_name, new_batch)
+        return render(success=f'Renamed to "{label}".')
+
     if request.method == 'POST' and request.form.get('action') == 'add_batch':
         parent_id = request.form.get('parent_job_id')
         batch_name = (request.form.get('batch_name') or '').strip()
@@ -1797,8 +1863,9 @@ def admin_jobs():
             return render(error='Choose a valid job to add a batch to')
         if not batch_name:
             return render(error='Batch name is required')
-        if batch_name in get_jobs().values():
-            return render(error=f'A job named "{batch_name}" already exists')
+        label = f'{get_job_title(parent_id)} – {batch_name}'
+        if label in get_jobs().values():
+            return render(error=f'This job already has a batch called "{batch_name}"')
 
         result = create_batch(parent_id, batch_name)
         if 'error' in result:

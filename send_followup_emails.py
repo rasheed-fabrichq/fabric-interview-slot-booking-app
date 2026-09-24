@@ -95,7 +95,8 @@ REQUIRED_COLUMNS = ('Name', 'Email', 'Candidate ID', 'Slot Booking Link')
 # Where the booking links point. This deployment is schedule.fabrichq.ai;
 # the older KOSMIC app is slot-booking.fabrichq.ai. Used only when the CSV
 # has no Slot Booking Link column and the link must be built from the ids.
-BOOKING_HOST = 'https://schedule.fabrichq.ai'
+BOOKING_HOST = (os.environ.get('BOOKING_BASE_URL')
+                or 'https://schedule.fabrichq.ai').rstrip('/')
 
 # Deliberately loose -- SES is the real authority on deliverability. This
 # only catches blank cells and obvious paste damage.

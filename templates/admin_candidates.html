@@ -32,6 +32,15 @@
         {% endif %}
         <noscript><button class="btn btn-primary">Apply</button></noscript>
     </form>
+    <div class="input-group candidate-search">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="search" class="form-control" id="candidate-search" placeholder="Search name, email, phone" aria-label="Search candidates" autocomplete="off">
+    </div>
+    <select class="form-select w-auto" id="phone-filter" aria-label="Filter by phone number">
+        <option value="all">Any phone</option>
+        <option value="1">Has phone</option>
+        <option value="0">No phone</option>
+    </select>
     <div class="segmented" role="group" aria-label="Filter by status">
         <button type="button" class="btn filter-btn active" data-status="all">
             All <span class="count">{{ candidates|length }}</span>
@@ -78,7 +87,8 @@
             </thead>
             <tbody>
                 {% for candidate in candidates %}
-                <tr data-status="{{ candidate.status }}">
+                <tr data-status="{{ candidate.status }}" data-phone="{{ 1 if candidate.phone else 0 }}"
+                    data-search="{{ [candidate.name, candidate.email, candidate.phone or '', candidate.candidate_id]|join(' ')|lower }}">
                     <td class="text-center">
                         <input class="form-check-input candidate-check" type="checkbox" name="candidate"
                                form="delete-candidates-form"
@@ -126,9 +136,8 @@
                     </td>
                     <td>
                         {# The link the candidate uses to pick a slot. #}
-                        {% set booking_link = request.host_url.rstrip('/')
-                            ~ '/book?candidate_id=' ~ candidate.candidate_id
-                            ~ '&job_id=' ~ (candidate.link_id or candidate.job_id) %}
+                        {% set booking_link = booking_link_for(candidate.candidate_id,
+                                                               candidate.link_id or candidate.job_id) %}
                         <div class="d-flex gap-1">
                             <a href="{{ booking_link }}" target="_blank"
                                class="btn btn-sm btn-outline-success text-nowrap"
@@ -189,6 +198,7 @@
 <style>
     .job-filter { width: auto; min-width: 18rem; max-width: 100%; flex-wrap: nowrap; }
     .job-filter .form-select { min-width: 10rem; }
+    .candidate-search { width: 18rem; max-width: 100%; }
 </style>
 {% endblock %}
 
@@ -200,31 +210,37 @@ document.addEventListener('DOMContentLoaded', function() {
     const tableRows = document.querySelectorAll('#candidatesTable tbody tr');
     const totalCount = document.getElementById('totalCount');
 
+    const searchInput = document.getElementById('candidate-search');
+    const phoneFilter = document.getElementById('phone-filter');
+    let filterStatus = 'all';
+
+    // Status, search and phone filters combine; a row shows only if it
+    // passes all three.
+    function applyFilters() {
+        const terms = (searchInput ? searchInput.value : '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+        const phone = phoneFilter ? phoneFilter.value : 'all';
+        let visibleCount = 0;
+        tableRows.forEach(row => {
+            const show = (filterStatus === 'all' || row.dataset.status === filterStatus)
+                && (phone === 'all' || row.dataset.phone === phone)
+                && terms.every(t => (row.dataset.search || '').includes(t));
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+        if (totalCount) totalCount.textContent = visibleCount;
+        document.dispatchEvent(new Event('candidates:filtered'));
+    }
+
     filterBtns.forEach(btn => {
         btn.addEventListener('click', function() {
-            // Remove active class from all buttons
             filterBtns.forEach(b => b.classList.remove('active'));
-            // Add active class to clicked button
             this.classList.add('active');
-
-            const filterStatus = this.dataset.status;
-            let visibleCount = 0;
-
-            tableRows.forEach(row => {
-                if (filterStatus === 'all' || row.dataset.status === filterStatus) {
-                    row.style.display = '';
-                    visibleCount++;
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-
-            // Update total count
-            if (totalCount) {
-                totalCount.textContent = visibleCount;
-            }
+            filterStatus = this.dataset.status;
+            applyFilters();
         });
     });
+    if (searchInput) searchInput.addEventListener('input', applyFilters);
+    if (phoneFilter) phoneFilter.addEventListener('change', applyFilters);
 
     // Selection and deletion
     const checks = Array.from(document.querySelectorAll('.candidate-check'));
@@ -249,12 +265,12 @@ document.addEventListener('DOMContentLoaded', function() {
         checks.forEach(cb => { cb.checked = this.checked && isVisible(cb); });
         refreshSelection();
     });
-    // A status filter hides rows; untick hidden ones so a delete only
-    // ever covers what is on screen.
-    filterBtns.forEach(btn => btn.addEventListener('click', function () {
+    // Filters hide rows; untick hidden ones so a delete only ever covers
+    // what is on screen.
+    document.addEventListener('candidates:filtered', function () {
         checks.forEach(cb => { if (!isVisible(cb)) cb.checked = false; });
         refreshSelection();
-    }));
+    });
 
     function openConfirm() {
         const selected = checks.filter(cb => cb.checked);

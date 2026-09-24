@@ -53,6 +53,10 @@ def init_database():
             -- generated job_id of its own.
             link_id TEXT NOT NULL,
             parent_job_id TEXT,                 -- set on batches only
+            -- Admin-only label telling a job's batches apart, e.g.
+            -- "Friday". Candidates only ever see job_name, which every
+            -- batch of a job shares.
+            batch_name TEXT,
 
             slot_start_time TEXT NOT NULL,
             slot_end_time TEXT NOT NULL,
@@ -176,6 +180,7 @@ def init_database():
             day_of_week TEXT NOT NULL,
             start_time TEXT NOT NULL,
             booked_count INTEGER DEFAULT 0,
+            blocked INTEGER NOT NULL DEFAULT 0,  -- 1: hidden from candidates
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(job_id, date, start_time),
             FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
@@ -384,12 +389,18 @@ def init_database():
 
 # ==================== JOB CONFIGURATION FUNCTIONS ====================
 
+# A job's admin-facing name: the job name plus its batch label, if any.
+LABEL_SQL = "jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name"
+
 def get_all_jobs():
     """Get all jobs as a dictionary {job_id: job_name}"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT job_id, job_name FROM job_configs ORDER BY created_at')
+    # Batches are labelled "<job> – <batch>" so admin dropdowns can
+    # tell them apart; candidates see get_job_title instead.
+    cursor.execute(f'SELECT jc.job_id, {LABEL_SQL} FROM job_configs jc '
+                   f'ORDER BY jc.created_at')
     jobs = {row['job_id']: row['job_name'] for row in cursor.fetchall()}
     conn.close()
 
@@ -448,10 +459,12 @@ def create_batch(parent_job_id, batch_name):
 
     copied = ('slot_start_time', 'slot_end_time', 'slot_duration_minutes',
               'capacity_per_slot') + COMMUNICATION_FIELDS
-    columns = ('job_id', 'job_name', 'link_id', 'parent_job_id',
-               'booking_enabled') + copied
-    values = (new_job_id, batch_name, parent['link_id'], root_job_id, 1,
-              *(parent[c] for c in copied))
+    # The batch shares the parent's job name -- that is what candidates
+    # see -- and batch_name only labels it for the admin.
+    columns = ('job_id', 'job_name', 'batch_name', 'link_id',
+               'parent_job_id', 'booking_enabled') + copied
+    values = (new_job_id, parent['job_name'], batch_name, parent['link_id'],
+              root_job_id, 1, *(parent[c] for c in copied))
 
     with get_db_transaction() as conn:
         conn.execute(
@@ -464,6 +477,35 @@ def create_batch(parent_job_id, batch_name):
         ''', (new_job_id, datetime.now(), parent_job_id))
 
     return {'success': True, 'job_id': new_job_id}
+
+
+def get_job_title(job_id):
+    """The job name candidates see. Shared by all of a job's batches."""
+    conn = get_db_connection()
+    row = conn.execute('SELECT job_name FROM job_configs WHERE job_id = ?',
+                       (job_id,)).fetchone()
+    conn.close()
+    return row['job_name'] if row else 'Unknown Job'
+
+
+def rename_job(job_id, job_name, batch_name=None):
+    """Rename a job, and set or clear its batch label.
+
+    job_name is what candidates see, so it is applied to every batch of
+    the job (every job sharing its link_id) to keep them consistent.
+    batch_name applies to this job only.
+    """
+    job = get_job_config(job_id)
+    if not job:
+        return {'error': 'Job not found'}
+    with get_db_transaction() as conn:
+        conn.execute('UPDATE job_configs SET job_name = ?, updated_at = ? '
+                     'WHERE link_id = ?',
+                     (job_name, datetime.now(), job['link_id']))
+        conn.execute('UPDATE job_configs SET batch_name = ?, updated_at = ? '
+                     'WHERE job_id = ?',
+                     (batch_name, datetime.now(), job_id))
+    return {'success': True}
 
 
 def link_id_exists(link_id):
@@ -506,7 +548,7 @@ def find_candidate_other_batch(candidate_id, link_id, job_id):
     """
     conn = get_db_connection()
     row = conn.execute('''
-        SELECT jc.job_name FROM candidates c
+        SELECT jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name FROM candidates c
         JOIN job_configs jc ON c.job_id = jc.job_id
         WHERE c.candidate_id = ? AND jc.link_id = ? AND c.job_id != ?
         LIMIT 1
@@ -954,9 +996,12 @@ def get_job_dates(job_id, only_bookable=False):
     # dates are dd-mm-yyyy strings, so sort by year/month/day rather than
     # lexically -- otherwise 01-08-2026 would sort before 30-07-2026.
     cursor.execute('''
-        SELECT date, day_of_week, slot_start_time, slot_end_time FROM job_dates
-        WHERE job_id = ?
-        ORDER BY substr(date, 7, 4), substr(date, 4, 2), substr(date, 1, 2)
+        SELECT d.date, d.day_of_week, d.slot_start_time, d.slot_end_time,
+               (SELECT COUNT(*) FROM bookings b JOIN slots s ON b.slot_id = s.id
+                WHERE s.job_id = d.job_id AND s.date = d.date) AS booked
+        FROM job_dates d
+        WHERE d.job_id = ?
+        ORDER BY substr(d.date, 7, 4), substr(d.date, 4, 2), substr(d.date, 1, 2)
     ''', (job_id,))
 
     dates = [dict(row) for row in cursor.fetchall()]
@@ -966,10 +1011,13 @@ def get_job_dates(job_id, only_bookable=False):
         bookable = []
         for d in dates:
             cursor.execute(
-                'SELECT start_time FROM slots WHERE job_id = ? AND date = ?',
+                'SELECT start_time FROM slots '
+                'WHERE job_id = ? AND date = ? AND blocked = 0',
                 (job_id, d['date']))
             times = [r['start_time'] for r in cursor.fetchall()]
             if any(not is_slot_in_past(d['date'], t, now) for t in times):
+                # Booking counts are for the admin, not candidates.
+                d.pop('booked', None)
                 bookable.append(d)
         dates = bookable
 
@@ -1013,25 +1061,49 @@ def update_job_date_times(job_id, date, start_time, end_time):
     return {'success': True}
 
 
-def delete_job_date(job_id, date):
-    """Delete an interview date for a job"""
+def count_bookings_on_date(job_id, date):
+    """How many candidates have booked a slot on this date."""
     conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # First delete any slots for this date
-    cursor.execute('''
-        DELETE FROM slots WHERE job_id = ? AND date = ?
-    ''', (job_id, date))
-
-    # Then delete the date
-    cursor.execute('''
-        DELETE FROM job_dates WHERE job_id = ? AND date = ?
-    ''', (job_id, date))
-
-    conn.commit()
+    n = conn.execute('''
+        SELECT COUNT(*) FROM bookings b JOIN slots s ON b.slot_id = s.id
+        WHERE s.job_id = ? AND s.date = ?
+    ''', (job_id, date)).fetchone()[0]
     conn.close()
+    return n
 
-    return {'success': True}
+
+def delete_job_date(job_id, date):
+    """Delete an interview date, its slots, and any bookings on them.
+
+    Candidates booked on the date go back to 'clicked', so their booking
+    link works again and they can pick another date. Their reminder
+    claims are cleared too. They are not notified.
+
+    Returns {'success': True, 'bookings_removed': n}.
+    """
+    with get_db_transaction() as conn:
+        booked = [r['candidate_id'] for r in conn.execute('''
+            SELECT b.candidate_id FROM bookings b
+            JOIN slots s ON b.slot_id = s.id
+            WHERE s.job_id = ? AND s.date = ?
+        ''', (job_id, date)).fetchall()]
+
+        for candidate_id in booked:
+            conn.execute('DELETE FROM bookings WHERE candidate_id = ? '
+                         'AND job_id = ?', (candidate_id, job_id))
+            conn.execute('DELETE FROM notifications WHERE candidate_id = ? '
+                         'AND job_id = ?', (candidate_id, job_id))
+            conn.execute('''
+                UPDATE candidates SET status = 'clicked', updated_at = ?
+                WHERE candidate_id = ? AND job_id = ?
+            ''', (datetime.now(), candidate_id, job_id))
+
+        conn.execute('DELETE FROM slots WHERE job_id = ? AND date = ?',
+                     (job_id, date))
+        conn.execute('DELETE FROM job_dates WHERE job_id = ? AND date = ?',
+                     (job_id, date))
+
+    return {'success': True, 'bookings_removed': len(booked)}
 
 
 # ==================== CANDIDATE FUNCTIONS ====================
@@ -1108,7 +1180,7 @@ def get_all_candidates(job_id=None):
                 c.status,
                 c.created_at,
                 c.updated_at,
-                jc.job_name,
+                jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name,
                 jc.link_id
             FROM candidates c
             LEFT JOIN job_configs jc ON c.job_id = jc.job_id
@@ -1127,7 +1199,7 @@ def get_all_candidates(job_id=None):
                 c.status,
                 c.created_at,
                 c.updated_at,
-                jc.job_name,
+                jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name,
                 jc.link_id
             FROM candidates c
             LEFT JOIN job_configs jc ON c.job_id = jc.job_id
@@ -1272,7 +1344,7 @@ def get_slots_by_job_and_date(job_id, date, include_past=False):
                ? as max_capacity,
                (? - booked_count) as available
         FROM slots
-        WHERE job_id = ? AND date = ?
+        WHERE job_id = ? AND date = ? AND blocked = 0
         ORDER BY start_time
     ''', (max_capacity, max_capacity, job_id, date))
 
@@ -1310,7 +1382,8 @@ def get_all_slots_for_job(job_id):
         SELECT id, job_id, date, day_of_week, start_time, booked_count,
                ? as max_capacity,
                (? - booked_count) as available,
-               ? as slot_duration_minutes
+               ? as slot_duration_minutes,
+               blocked
         FROM slots
         WHERE job_id = ?
         ORDER BY date, start_time
@@ -1322,6 +1395,30 @@ def get_all_slots_for_job(job_id):
     return slots
 
 
+def set_slots_blocked(job_id, blocked, slot_id=None, date=None):
+    """Block or unblock one slot, or every slot on a date.
+
+    A blocked slot is hidden from candidates and cannot be booked.
+    Existing bookings on it are kept -- blocking only stops new ones.
+    Returns the number of slots changed.
+    """
+    if slot_id is None and date is None:
+        raise ValueError('Pass slot_id or date')
+    query = 'UPDATE slots SET blocked = ? WHERE job_id = ?'
+    params = [1 if blocked else 0, job_id]
+    if slot_id is not None:
+        query += ' AND id = ?'
+        params.append(slot_id)
+    if date is not None:
+        query += ' AND date = ?'
+        params.append(date)
+    conn = get_db_connection()
+    cursor = conn.execute(query, params)
+    conn.commit()
+    conn.close()
+    return cursor.rowcount
+
+
 def clear_slots_for_job(job_id):
     """Clear all slots for a specific job"""
     conn = get_db_connection()
@@ -1329,6 +1426,10 @@ def clear_slots_for_job(job_id):
 
     # Delete bookings for this job first
     cursor.execute('DELETE FROM bookings WHERE job_id = ?', (job_id,))
+
+    # And their reminder claims, or a candidate who rebooks is never
+    # reminded about the new slot.
+    cursor.execute('DELETE FROM notifications WHERE job_id = ?', (job_id,))
 
     # Delete slots
     cursor.execute('DELETE FROM slots WHERE job_id = ?', (job_id,))
@@ -1384,7 +1485,7 @@ def book_slot(candidate_id, job_id, slot_id):
 
             # Get slot details with lock
             cursor.execute('''
-                SELECT id, booked_count, start_time, date, job_id
+                SELECT id, booked_count, start_time, date, job_id, blocked
                 FROM slots
                 WHERE id = ?
             ''', (slot_id,))
@@ -1404,6 +1505,12 @@ def book_slot(candidate_id, job_id, slot_id):
             # Verify slot belongs to the correct job
             if slot['job_id'] != job_id:
                 return {'error': 'Invalid slot for this job.'}
+
+            # Checked here too, for a page loaded before the admin
+            # blocked the slot.
+            if slot['blocked']:
+                return {'error': 'That time slot is no longer available. '
+                                 'Please choose another one.'}
 
             # Get job capacity
             cursor.execute('''
@@ -1493,7 +1600,7 @@ def get_all_bookings(job_id=None):
                 c.name,
                 c.email,
                 c.interview_link,
-                jc.job_name,
+                jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name,
                 b.job_id,
                 jc.link_id,
                 s.date,
@@ -1518,7 +1625,7 @@ def get_all_bookings(job_id=None):
                 c.name,
                 c.email,
                 c.interview_link,
-                jc.job_name,
+                jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name,
                 b.job_id,
                 jc.link_id,
                 s.date,
@@ -1663,7 +1770,7 @@ def get_dashboard_stats():
     cursor.execute('''
         SELECT
             jc.job_id,
-            jc.job_name,
+            jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name,
             jc.booking_enabled,
             (SELECT COUNT(*) FROM candidates WHERE job_id = jc.job_id) as total_candidates,
             (SELECT COUNT(*) FROM bookings WHERE job_id = jc.job_id) as total_bookings,
@@ -1948,7 +2055,7 @@ def get_call_logs(job_id=None, status=None, outcome=None):
         SELECT
             cl.*,
             c.name, c.email,
-            jc.job_name
+            jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name
         FROM call_logs cl
         LEFT JOIN candidates c
           ON cl.candidate_id = c.candidate_id AND cl.job_id = c.job_id
@@ -1979,7 +2086,7 @@ def get_call_log(execution_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT cl.*, c.name, c.email, jc.job_name
+        SELECT cl.*, c.name, c.email, jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name
         FROM call_logs cl
         LEFT JOIN candidates c
           ON cl.candidate_id = c.candidate_id AND cl.job_id = c.job_id
@@ -2036,7 +2143,7 @@ def get_notification_log(job_id=None, status=None, channel=None):
             n.slot_date, n.slot_start_time, n.attempts, n.provider_ref,
             n.error, n.created_at, n.updated_at,
             c.name, c.email, c.phone,
-            jc.job_name
+            jc.job_name || COALESCE(' – ' || jc.batch_name, '') AS job_name
         FROM notifications n
         LEFT JOIN candidates c
           ON n.candidate_id = c.candidate_id AND n.job_id = c.job_id
