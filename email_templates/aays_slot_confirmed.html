@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="x-apple-disable-message-reformatting">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+    <title>Aays Analytics AI Interview - Slot Confirmation</title>
+    <style>
+        :root {
+            color-scheme: light;
+            box-sizing: border-box;
+            padding-top: env(safe-area-inset-top, 0px);
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+            background-color: #EBF3FF;
+        }
+
+        body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            background-color: #EBF3FF !important;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .wrapper {
+            width: 100%;
+            background-color: #EBF3FF !important;
+            padding: 40px 0;
+        }
+
+        .container {
+            width: 95%;
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff !important;
+            border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(31, 55, 117, 0.08);
+            overflow: hidden;
+            border-collapse: separate;
+        }
+
+        .content-padding {
+            padding: 40px 48px;
+        }
+
+        p, li, div {
+            color: #1D1D1F;
+            font-size: 15px;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        p { margin-bottom: 16px; }
+
+        .label {
+            font-weight: 600;
+            color: #1F3775 !important;
+        }
+
+        .secondary-text {
+            color: #86868B;
+            font-size: 13px;
+        }
+
+        /* Confirmed details card */
+        .slot-box {
+            background-color: #F4F7FC;
+            border: 1px solid #DCE5F5;
+            border-radius: 12px;
+            padding: 22px 24px;
+            margin: 8px 0 24px 0;
+        }
+
+        .slot-badge {
+            color: #1F3775;
+            font-weight: 800;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 1.5px;
+            display: block;
+            margin-bottom: 14px;
+        }
+
+        .detail-table td {
+            padding: 10px 0;
+            font-size: 14px;
+            vertical-align: top;
+            border-bottom: 1px solid #DCE5F5;
+        }
+        .detail-table tr:last-child td { border-bottom: none; }
+        .detail-table .detail-label {
+            color: #1F3775;
+            font-weight: 600;
+            width: 34%;
+        }
+        .detail-table .detail-value { color: #424245; }
+        .detail-table a { color: #1F3775; font-weight: 600; text-decoration: underline; }
+
+        /* Support callout */
+        .info-card {
+            background-color: #FBFBFD;
+            border-left: 4px solid #1F3775;
+            padding: 16px 20px;
+            margin-bottom: 8px;
+            border-radius: 4px 8px 8px 4px;
+        }
+
+        /* Proctoring box */
+        .warning-box {
+            background-color: #FFF9F9;
+            border: 1px solid #FFE5E5;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 24px 0;
+        }
+        .warning-title {
+            font-weight: 700;
+            font-size: 13px;
+            color: #D70015;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 8px;
+            display: block;
+        }
+        .warning-text {
+            font-size: 14px;
+            color: #1D1D1F;
+            line-height: 1.5;
+        }
+
+        .footer {
+            padding: 28px 48px;
+            background-color: #FBFBFD;
+            border-top: 1px solid #F5F5F7;
+        }
+        .signature-name {
+            color: #1F3775;
+            font-weight: 700;
+            font-size: 15px;
+            margin-bottom: 2px;
+            display: block;
+        }
+
+        @media only screen and (max-width: 600px) {
+            .content-padding { padding: 32px 24px !important; }
+            .footer { padding: 24px !important; }
+            .wrapper { padding: 20px 0 !important; }
+            .container { width: 100% !important; border-radius: 0 !important; }
+            .detail-table td { display: block !important; width: 100% !important; box-sizing: border-box !important; }
+            .detail-table .detail-label { border-bottom: none; padding-bottom: 2px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <table class="container" align="center" cellpadding="0" cellspacing="0" border="0" role="presentation">
+
+            <!-- Logo -->
+            <tr>
+                <td align="center" style="padding: 36px 0 12px 0;">
+                    <img src="https://machinecon.aimmediahouse.com/wp-content/uploads/2024/05/Logo-Aays.png"
+                        alt="Aays Analytics" height="28" style="height: 28px; width: auto; max-width: 100%; display: block;" />
+                </td>
+            </tr>
+
+            <tr>
+                <td class="content-padding">
+
+                    <p>Hi <span class="label">{{Candidate Name}}</span>,</p>
+                    <p>Thank you for securing your slot for the AI Interview.</p>
+
+                    <!-- Confirmed details -->
+                    <div class="slot-box">
+                        <span class="slot-badge">Your Confirmed AI Interview Details</span>
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0" class="detail-table" role="presentation">
+                            <tr>
+                                <td class="detail-label">Role</td>
+                                <td class="detail-value">{{Job Name}}, Aays Analytics</td>
+                            </tr>
+                            <tr>
+                                <td class="detail-label">Date</td>
+                                <td class="detail-value">{{Slot Date}}</td>
+                            </tr>
+                            <tr>
+                                <td class="detail-label">Time (IST)</td>
+                                <td class="detail-value">{{Start Time}} to {{End Time}} ({{Duration}} slot window)</td>
+                            </tr>
+                            <tr>
+                                <td class="detail-label">Unique Link</td>
+                                <td class="detail-value"><a href="{{Assessment Link}}">Join your AI Interview</a></td>
+                            </tr>
+                            <tr>
+                                <td class="detail-label">Duration</td>
+                                <td class="detail-value">~30 minutes. <em>(A 30-minute counter will be visible during the interview. This is NOT a hard stop; it indicates time remaining, and the interview will continue past zero until you finish your thoughts.)</em></td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <p>Please note that this round is intended to help us better understand your fitment for the role and will be used as an input into the overall hiring process.</p>
+
+                    <!-- Proctoring / integrity -->
+                    <div class="warning-box">
+                        <span class="warning-title">Proctoring &amp; Integrity</span>
+                        <div class="warning-text">
+                            This session is <strong>fully proctored</strong>, so your camera and microphone must remain active throughout. Our system monitors for the use of AI tools, external assistance, or unauthorized tabs, so we highly recommend not using anything that would put you at a disadvantage.
+                        </div>
+                    </div>
+
+                    <div class="info-card">
+                        <p style="margin-bottom: 0; font-size: 14px;">For any queries, you can email us directly at <a href="mailto:support@fabrichq.ai" style="color:#1F3775; font-weight:600; text-decoration:underline;">support@fabrichq.ai</a>.</p>
+                    </div>
+
+                </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+                <td class="footer">
+                    <span class="signature-name">Campus Hiring Team</span>
+                    <p style="margin: 0 0 8px 0;"><span class="label">Aays Analytics</span></p>
+                    <p class="secondary-text" style="margin: 0;">Best regards, wishing you a great interview.</p>
+                </td>
+            </tr>
+
+        </table>
+    </div>
+</body>
+</html>

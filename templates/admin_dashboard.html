@@ -1,0 +1,391 @@
+{% extends "admin_base.html" %}
+
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Booking progress across every job, plus shortcuts to setup, data and exports.{% endblock %}
+{% block page_actions %}
+<a href="/admin/upload" class="btn btn-outline-primary"><i class="bi bi-cloud-arrow-up"></i> Upload Candidates</a>
+<div class="btn-group">
+    <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+        <i class="bi bi-download"></i> Export Bookings
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end">
+        <li><h6 class="dropdown-header">All jobs</h6></li>
+        <li><a class="dropdown-item" href="/admin/export?format=xlsx"><i class="bi bi-file-earmark-excel"></i> Excel (.xlsx)</a></li>
+        <li><a class="dropdown-item" href="/admin/export?format=csv"><i class="bi bi-filetype-csv"></i> CSV (.csv)</a></li>
+    </ul>
+</div>
+{% endblock %}
+
+{% block admin_content %}
+{% set total_jobs = stats.job_stats|length %}
+{% set active_jobs = stats.job_stats|selectattr('booking_enabled')|list|length %}
+{% set ns = namespace(pending=0, clicked=0) %}
+{% for js in stats.job_stats %}
+    {% set ns.pending = ns.pending + (js.pending_count or 0) %}
+    {% set ns.clicked = ns.clicked + (js.clicked_count or 0) %}
+{% endfor %}
+{% set booking_rate = ((stats.total_bookings / stats.total_candidates) * 100) if stats.total_candidates else 0 %}
+
+<!-- KPIs -->
+<div class="row g-3 mb-2">
+    <div class="col-6 col-xl-3">
+        <div class="stat-card stat-primary">
+            <div class="stat-icon"><i class="bi bi-people"></i></div>
+            <div>
+                <p class="stat-label">Total Candidates</p>
+                <p class="stat-value">{{ stats.total_candidates }}</p>
+                <div class="stat-meta">Across all jobs</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="stat-card stat-success">
+            <div class="stat-icon"><i class="bi bi-calendar-check"></i></div>
+            <div>
+                <p class="stat-label">Total Bookings</p>
+                <p class="stat-value">{{ stats.total_bookings }}</p>
+                <div class="stat-meta">{{ "%.0f"|format(booking_rate) }}% of candidates booked</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="stat-card stat-warning">
+            <div class="stat-icon"><i class="bi bi-hourglass-split"></i></div>
+            <div>
+                <p class="stat-label">Not Yet Booked</p>
+                <p class="stat-value">{{ ns.pending + ns.clicked }}</p>
+                <div class="stat-meta">{{ ns.pending }} pending · {{ ns.clicked }} clicked</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="stat-card stat-info">
+            <div class="stat-icon"><i class="bi bi-briefcase"></i></div>
+            <div>
+                <p class="stat-label">Jobs Accepting Bookings</p>
+                <p class="stat-value">{{ active_jobs }}<span class="fs-6 text-muted fw-medium"> / {{ total_jobs }}</span></p>
+                <div class="stat-meta">{{ total_jobs - active_jobs }} paused</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Per-Job -->
+<h2 class="section-title">Jobs <small>Pause or resume booking per job</small></h2>
+{% if stats.job_stats %}
+<div class="row g-3">
+    {% for job_stat in stats.job_stats %}
+    {% set total = job_stat.total_candidates %}
+    <div class="col-md-6 col-xxl-4">
+        <div class="card job-card">
+            <div class="card-body">
+                <div class="job-card-head">
+                    <div style="min-width:0;">
+                        <h3 class="job-card-title">{{ job_stat.job_name }}</h3>
+                        <div class="id-mono">{{ job_stat.job_id }}</div>
+                    </div>
+                    {% if job_stat.booking_enabled %}
+                        <span class="status-pill status-active">Active</span>
+                    {% else %}
+                        <span class="status-pill status-paused">Paused</span>
+                    {% endif %}
+                </div>
+
+                <div class="job-metrics">
+                    <div class="metric">
+                        <div class="metric-label">Candidates</div>
+                        <div class="metric-value">{{ job_stat.total_candidates }}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Bookings</div>
+                        <div class="metric-value text-success">{{ job_stat.total_bookings }}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Pending</div>
+                        <div class="metric-value" style="color: var(--warning);">{{ job_stat.pending_count or 0 }}</div>
+                    </div>
+                </div>
+
+                <div class="job-progress">
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span class="fw-semibold">Status breakdown</span>
+                        <span class="text-muted">{% if total > 0 %}{{ "%.0f"|format((job_stat.booked_count or 0) / total * 100) }}% booked{% else %}No candidates yet{% endif %}</span>
+                    </div>
+                    <div class="progress" role="progressbar" aria-label="Status breakdown">
+                        {% if total > 0 %}
+                        <div class="progress-bar bar-pending" style="width: {{ (job_stat.pending_count or 0) / total * 100 }}%"
+                             title="Pending: {{ job_stat.pending_count or 0 }}"></div>
+                        <div class="progress-bar bar-clicked" style="width: {{ (job_stat.clicked_count or 0) / total * 100 }}%"
+                             title="Clicked: {{ job_stat.clicked_count or 0 }}"></div>
+                        <div class="progress-bar bar-booked" style="width: {{ (job_stat.booked_count or 0) / total * 100 }}%"
+                             title="Booked: {{ job_stat.booked_count or 0 }}"></div>
+                        {% endif %}
+                    </div>
+                    <div class="legend">
+                        <span class="legend-item"><span class="legend-dot dot-pending"></span>Pending {{ job_stat.pending_count or 0 }}</span>
+                        <span class="legend-item"><span class="legend-dot dot-clicked"></span>Clicked {{ job_stat.clicked_count or 0 }}</span>
+                        <span class="legend-item"><span class="legend-dot dot-booked"></span>Booked {{ job_stat.booked_count or 0 }}</span>
+                    </div>
+                </div>
+
+                <div class="job-card-actions">
+                    <a href="/admin/slots?job_id={{ job_stat.job_id }}" class="btn btn-outline-secondary btn-sm" title="Time slots & booking counts">
+                        <i class="bi bi-clock-history"></i> Slots
+                    </a>
+                    <a href="/admin/candidates?job_id={{ job_stat.job_id }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-people"></i> Candidates
+                    </a>
+                    <a href="/admin/bookings?job_id={{ job_stat.job_id }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-calendar-check"></i> Bookings
+                    </a>
+                    <!-- Per-Job Toggle -->
+                    <form method="POST" action="/admin/toggle-job-booking/{{ job_stat.job_id }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        {% if job_stat.booking_enabled %}
+                            <input type="hidden" name="action" value="disable">
+                            <button type="submit" class="btn btn-outline-warning btn-sm"
+                                    onclick="return confirm('Pause booking for {{ job_stat.job_name }}?')">
+                                <i class="bi bi-pause-circle"></i> Pause Booking
+                            </button>
+                        {% else %}
+                            <input type="hidden" name="action" value="enable">
+                            <button type="submit" class="btn btn-success btn-sm"
+                                    onclick="return confirm('Resume booking for {{ job_stat.job_name }}?')">
+                                <i class="bi bi-play-circle"></i> Resume Booking
+                            </button>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-briefcase"></i></div>
+        <h5>No jobs yet</h5>
+        <p>Create your first job to start collecting bookings.</p>
+        <a href="/admin/jobs" class="btn btn-primary mt-3"><i class="bi bi-plus-lg"></i> Create a job</a>
+    </div>
+</div>
+{% endif %}
+
+<!-- Setup workflow -->
+<h2 class="section-title">Setup workflow <small>Typical order for launching a new job</small></h2>
+<div class="row g-3">
+    <div class="col-sm-6 col-lg-4 col-xxl">
+        <a class="quick-link" href="/admin/jobs">
+            <span class="ql-step">1</span>
+            <span><span class="ql-title d-block">Manage Jobs</span><span class="ql-desc">Create new jobs</span></span>
+            <i class="bi bi-chevron-right"></i>
+        </a>
+    </div>
+    <div class="col-sm-6 col-lg-4 col-xxl">
+        <a class="quick-link" href="/admin/job-config">
+            <span class="ql-step">2</span>
+            <span><span class="ql-title d-block">Job Configuration</span><span class="ql-desc">Time, duration, capacity</span></span>
+            <i class="bi bi-chevron-right"></i>
+        </a>
+    </div>
+    <div class="col-sm-6 col-lg-4 col-xxl">
+        <a class="quick-link" href="/admin/job-dates">
+            <span class="ql-step">3</span>
+            <span><span class="ql-title d-block">Manage Dates</span><span class="ql-desc">AI discussion dates</span></span>
+            <i class="bi bi-chevron-right"></i>
+        </a>
+    </div>
+    <div class="col-sm-6 col-lg-4 col-xxl">
+        <a class="quick-link" href="/admin/init-slots">
+            <span class="ql-step">4</span>
+            <span><span class="ql-title d-block">Initialize Slots</span><span class="ql-desc">Create time slots</span></span>
+            <i class="bi bi-chevron-right"></i>
+        </a>
+    </div>
+    <div class="col-sm-6 col-lg-4 col-xxl">
+        <a class="quick-link" href="/admin/upload">
+            <span class="ql-step">5</span>
+            <span><span class="ql-title d-block">Upload Candidates</span><span class="ql-desc">CSV/Excel upload</span></span>
+            <i class="bi bi-chevron-right"></i>
+        </a>
+    </div>
+</div>
+
+<!-- Data & Reports -->
+<h2 class="section-title">Data &amp; reports</h2>
+<div class="row g-3">
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <span class="card-title-icon"><i class="bi bi-people"></i></span>
+                <div><h5>Candidates</h5><p class="card-subtitle-text">All uploaded candidates</p></div>
+            </div>
+            <div class="card-body action-stack">
+                <a href="/admin/candidates" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-list-ul"></i> View All Candidates
+                </a>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        <span><i class="bi bi-funnel"></i> Filter by Job</span>
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/candidates?job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                                <span class="status-pill pill-primary no-dot">{{ job_stat.total_candidates }}</span>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <span class="card-title-icon tone-success"><i class="bi bi-calendar-check"></i></span>
+                <div><h5>Bookings</h5><p class="card-subtitle-text">All confirmed bookings</p></div>
+            </div>
+            <div class="card-body action-stack">
+                <a href="/admin/bookings" class="btn btn-outline-success btn-sm">
+                    <i class="bi bi-list-ul"></i> View All Bookings
+                </a>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        <span><i class="bi bi-funnel"></i> Filter by Job</span>
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/bookings?job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                                <span class="status-pill pill-success no-dot">{{ job_stat.total_bookings }}</span>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        <span><i class="bi bi-clock-history"></i> View Slots</span>
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/slots?job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <span class="card-title-icon tone-warning"><i class="bi bi-bell"></i></span>
+                <div><h5>Reminders</h5><p class="card-subtitle-text">Reminder emails &amp; calls before each slot</p></div>
+            </div>
+            <div class="card-body action-stack">
+                <a href="/admin/notifications" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-list-check"></i> View Reminder Log
+                </a>
+                <a href="/admin/notifications?status=failed" class="btn btn-outline-danger btn-sm">
+                    <i class="bi bi-exclamation-triangle"></i> Failed Only
+                </a>
+                <a href="/admin/calls" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-telephone"></i> Reminder Calls
+                </a>
+                <a href="{{ url_for('admin_communications', tab='call') }}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-gear"></i> Call Settings
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <span class="card-title-icon tone-info"><i class="bi bi-download"></i></span>
+                <div><h5>Exports</h5><p class="card-subtitle-text">Excel / CSV downloads</p></div>
+            </div>
+            <div class="card-body action-stack">
+                <div class="form-section-title mb-0">Bookings — all jobs</div>
+                <div class="btn-group">
+                    <a href="/admin/export?format=xlsx" class="btn btn-success btn-sm justify-content-center">
+                        <i class="bi bi-file-earmark-excel"></i> Excel
+                    </a>
+                    <a href="/admin/export?format=csv" class="btn btn-outline-success btn-sm justify-content-center">
+                        <i class="bi bi-filetype-csv"></i> CSV
+                    </a>
+                </div>
+                <div class="form-section-title mb-0 mt-1">Bookings — by job</div>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        <span><i class="bi bi-file-earmark-excel"></i> Excel</span>
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/export?format=xlsx&job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                                <span class="status-pill pill-success no-dot">{{ job_stat.total_bookings }}</span>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        <span><i class="bi bi-filetype-csv"></i> CSV</span>
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/export?format=csv&job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                                <span class="status-pill pill-neutral no-dot">{{ job_stat.total_bookings }}</span>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="form-section-title mb-0 mt-1">Non-booked candidates (CSV)</div>
+                <a href="/admin/export-pending" class="btn btn-outline-warning btn-sm">
+                    <i class="bi bi-person-x"></i> All Non-Booked
+                </a>
+                <div class="btn-group">
+                    <a href="/admin/export-pending?status=pending" class="btn btn-outline-secondary btn-sm justify-content-center">
+                        Pending Only
+                    </a>
+                    <a href="/admin/export-pending?status=clicked" class="btn btn-outline-secondary btn-sm justify-content-center">
+                        Clicked Only
+                    </a>
+                </div>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        <span><i class="bi bi-funnel"></i> Non-Booked by Job</span>
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        {% for job_stat in stats.job_stats %}
+                        <li>
+                            <a class="dropdown-item" href="/admin/export-pending?job_id={{ job_stat.job_id }}">
+                                {{ job_stat.job_name }}
+                                <span class="status-pill pill-warning no-dot">{{ (job_stat.pending_count or 0) + (job_stat.clicked_count or 0) }}</span>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

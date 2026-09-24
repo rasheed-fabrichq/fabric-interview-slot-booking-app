@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meesho AI Interview - Slot Confirmation</title>
+
+    <style>
+        /* Base Styles */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', Arial, sans-serif;
+            background-color: #f8f0f6;
+        }
+
+        /* Responsive Styles (Mobile View) */
+        @media only screen and (max-width: 600px) {
+            .container {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            .card-padding {
+                padding: 30px 20px !important;
+            }
+            .body-text {
+                font-size: 14px !important;
+                line-height: 22px !important;
+            }
+            .top-logo {
+                padding: 20px !important;
+            }
+            .detail-table td {
+                display: block !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+        }
+    </style>
+</head>
+
+<body style="margin: 0; padding: 0; font-family: 'Inter', Arial, sans-serif; background-color: #f8f0f6;">
+
+    <!-- MAIN WRAPPER TABLE -->
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"
+        style="background-color: #f8f0f6; padding: 40px 20px;" role="presentation">
+        <tr>
+            <td align="center">
+
+                <!-- INNER CONTAINER (600px max-width) -->
+                <table width="600" cellpadding="0" cellspacing="0" border="0"
+                    style="max-width: 600px;" class="container" role="presentation">
+
+                    <!-- TOP COMPANY LOGO -->
+                    <tr>
+                        <td style="padding: 0 0 30px 0;" class="top-logo">
+                            <img src="https://www.meesho.io/img/meesho-logo.png"
+                                alt="Meesho"
+                                width="120" height="50"
+                                style="display: block; border: 0; width: auto; height: 50px;" />
+                        </td>
+                    </tr>
+
+                    <!-- MAIN CONTENT CARD -->
+                    <tr>
+                        <td style="padding-bottom: 20px;">
+                            <table width="100%" cellpadding="0" cellspacing="0" border="0"
+                                style="background-color: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"
+                                role="presentation">
+                                <tr>
+                                    <td style="padding: 32px 32px;" class="card-padding">
+
+                                        <!-- SALUTATION & INTRO -->
+                                        <p style="margin: 0 0 16px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            Hi <strong style="font-weight: 700;">{{Candidate Name}}</strong>,
+                                        </p>
+
+                                        <p style="margin: 0 0 24px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            Thank you for securing your slot for the AI Interview.
+                                        </p>
+
+                                        <!-- CONFIRMED DETAILS -->
+                                        <p style="margin: 0 0 12px 0; color: #662237; font-size: 16px; line-height: 24px; font-weight: 700;">
+                                            Your Confirmed AI Discussion Details
+                                        </p>
+
+                                        <table width="100%" cellpadding="0" cellspacing="0" border="0"
+                                            class="detail-table"
+                                            style="border-collapse: collapse; margin-bottom: 28px; border: 1px solid #eeeeee; border-radius: 8px; overflow: hidden;"
+                                            role="presentation">
+                                            <tr>
+                                                <td style="padding: 12px 16px; background-color: #fdf2f5; color: #662237; font-size: 13px; font-weight: 700; width: 34%; border-bottom: 1px solid #eeeeee; vertical-align: top;">Role</td>
+                                                <td style="padding: 12px 16px; background-color: #ffffff; color: #4B4B4B; font-size: 14px; line-height: 20px; border-bottom: 1px solid #eeeeee; vertical-align: top;">{{Job Name}}, Meesho</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 12px 16px; background-color: #fdf2f5; color: #662237; font-size: 13px; font-weight: 700; width: 34%; border-bottom: 1px solid #eeeeee; vertical-align: top;">Date</td>
+                                                <td style="padding: 12px 16px; background-color: #ffffff; color: #4B4B4B; font-size: 14px; line-height: 20px; border-bottom: 1px solid #eeeeee; vertical-align: top;">{{Slot Date}}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 12px 16px; background-color: #fdf2f5; color: #662237; font-size: 13px; font-weight: 700; width: 34%; border-bottom: 1px solid #eeeeee; vertical-align: top;">Time (IST)</td>
+                                                <td style="padding: 12px 16px; background-color: #ffffff; color: #4B4B4B; font-size: 14px; line-height: 20px; border-bottom: 1px solid #eeeeee; vertical-align: top;">{{Start Time}} to {{End Time}} ({{Duration}} slot window)</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 12px 16px; background-color: #fdf2f5; color: #662237; font-size: 13px; font-weight: 700; width: 34%; border-bottom: 1px solid #eeeeee; vertical-align: top;">Unique Link</td>
+                                                <td style="padding: 12px 16px; background-color: #ffffff; color: #4B4B4B; font-size: 14px; line-height: 20px; border-bottom: 1px solid #eeeeee; vertical-align: top;">
+                                                    <a href="{{Assessment Link}}" style="color: #662237; font-weight: 600; text-decoration: underline; word-break: break-all;">Join your AI Discussion</a>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 12px 16px; background-color: #fdf2f5; color: #662237; font-size: 13px; font-weight: 700; width: 34%; vertical-align: top;">Duration</td>
+                                                <td style="padding: 12px 16px; background-color: #ffffff; color: #4B4B4B; font-size: 14px; line-height: 20px; vertical-align: top;">
+                                                    ~20 minutes. <em>(Please note: a 20-minute counter will be visible during the discussion. This is NOT a hard stop &mdash; it indicates the time remaining, but the discussion will continue past zero until you finish your thoughts.)</em>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <p style="margin: 0 0 28px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            Please note that this round is intended to help us better understand your fitment for the role and will be used as an input into the overall hiring process.
+                                        </p>
+
+                                        <!-- SECTION: WHY THIS INTERVIEW -->
+                                        <p style="margin: 0 0 12px 0; color: #662237; font-size: 16px; line-height: 24px; font-weight: 700;">
+                                            Why This Interview is Your Competitive Edge
+                                        </p>
+                                        <p style="margin: 0 0 12px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            As communicated already, the objective of this AI Discussion is:
+                                        </p>
+                                        <ul style="margin: 0 0 28px 20px; padding: 0;" class="body-text">
+                                            <li style="margin-bottom: 10px; color: #4B4B4B; font-size: 15px; line-height: 24px;">
+                                                <strong>Interview Readiness:</strong> This AI Interview acts as a personalized mirror, highlighting your structural strengths and weaknesses under pressure before the high-stakes human interviews. You gain valuable insight into the type of probing the final panel will use.
+                                            </li>
+                                            <li style="margin-bottom: 0; color: #4B4B4B; font-size: 15px; line-height: 24px;">
+                                                <strong>Fit &amp; Skills:</strong> Helps us understand you and your core competencies (problem-solving, analytical rigor, strategic thinking).
+                                            </li>
+                                        </ul>
+
+                                        <!-- SECTION: PROCTORING -->
+                                        <p style="margin: 0 0 12px 0; color: #662237; font-size: 16px; line-height: 24px; font-weight: 700;">
+                                            Critical Instructions &amp; Integrity
+                                        </p>
+                                        <p style="margin: 0 0 28px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            <strong>Proctoring:</strong> The session is fully proctored. Your camera and microphone must remain active throughout. We highly recommend not using any tools that would put you at a disadvantage.
+                                        </p>
+
+                                        <!-- SECTION: PREPARATION GUIDANCE -->
+                                        <p style="margin: 0 0 12px 0; color: #662237; font-size: 16px; line-height: 24px; font-weight: 700;">
+                                            Preparation Guidance: Maximizing Your Performance
+                                        </p>
+
+                                        <p style="margin: 0 0 4px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            <strong>AI Interview Focus:</strong>
+                                        </p>
+                                        <ul style="margin: 0 0 16px 20px; padding: 0;" class="body-text">
+                                            <li style="margin-bottom: 6px; color: #4B4B4B; font-size: 15px; line-height: 24px;">
+                                                The AI Interview will focus on your CV and include some Problem-Solving Questions.
+                                            </li>
+                                            <li style="margin-bottom: 0; color: #4B4B4B; font-size: 15px; line-height: 24px;">
+                                                Focus on articulating your structured approach and logic.
+                                            </li>
+                                        </ul>
+
+                                        <p style="margin: 0 0 4px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            <strong>Interaction Dynamics:</strong>
+                                        </p>
+                                        <ul style="margin: 0 0 20px 20px; padding: 0;" class="body-text">
+                                            <li style="margin-bottom: 6px; color: #4B4B4B; font-size: 15px; line-height: 24px;">
+                                                Treat the AI Agent like a Human Interviewer (it is conversational!).
+                                            </li>
+                                            <li style="margin-bottom: 6px; color: #4B4B4B; font-size: 15px; line-height: 24px;">
+                                                Feel free to ask clarifying / probing questions.
+                                            </li>
+                                            <li style="margin-bottom: 0; color: #4B4B4B; font-size: 15px; line-height: 24px;">
+                                                Expect cross-questions to probe your logic and assumptions deeply.
+                                            </li>
+                                        </ul>
+
+                                        <!-- DOs and DONTs -->
+                                        <div style="background-color: #fafafa; border: 1px solid #eeeeee; padding: 16px; border-radius: 8px; margin-bottom: 28px;">
+                                            <p style="margin: 0 0 8px 0; color: #2e7d32; font-size: 15px; font-weight: 700;">
+                                                &#9989; What to DO (Structure &amp; Logic):
+                                            </p>
+                                            <ul style="margin: 0 0 16px 20px; padding: 0;" class="body-text">
+                                                <li style="margin-bottom: 6px; color: #4B4B4B; font-size: 14px; line-height: 22px;">
+                                                    <strong>Structure First:</strong> Verbally outline your problem-solving framework before providing the final solution.
+                                                </li>
+                                                <li style="margin-bottom: 6px; color: #4B4B4B; font-size: 14px; line-height: 22px;">
+                                                    <strong>Justify Assumptions:</strong> Clearly state and rationalize any assumptions you make during guesstimates.
+                                                </li>
+                                                <li style="margin-bottom: 0; color: #4B4B4B; font-size: 14px; line-height: 22px;">
+                                                    <strong>Be Concise and Clear!</strong>
+                                                </li>
+                                            </ul>
+
+                                            <p style="margin: 0 0 8px 0; color: #c62828; font-size: 15px; font-weight: 700;">
+                                                &#128683; What to AVOID (Critical Mistakes):
+                                            </p>
+                                            <ul style="margin: 0 0 0 20px; padding: 0;" class="body-text">
+                                                <li style="margin-bottom: 6px; color: #4B4B4B; font-size: 14px; line-height: 22px;">
+                                                    <strong>Long Silences / Stalling:</strong> The system tracks prolonged pauses. Avoid dead air; verbalize your thought process if you need a moment. If you want a couple of seconds to think and jot down points in your notebook, feel free to convey this to the AI Agent.
+                                                </li>
+                                                <li style="margin-bottom: 0; color: #4B4B4B; font-size: 14px; line-height: 22px;">
+                                                    <strong>Vague/Generic Answers:</strong> Avoid reciting textbook definitions. Use personal project examples and analytical language.
+                                                </li>
+                                            </ul>
+                                        </div>
+
+                                        <!-- CLOSING -->
+                                        <p style="margin: 0 0 20px 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            This is an opportunity to experience the format, evaluate your preparation, and be better equipped for the interview rounds ahead. We wish you the very best!
+                                        </p>
+
+                                        <p style="margin: 0 0 12px 0; color: #4B4B4B; font-size: 14px; line-height: 22px;" class="body-text">
+                                            You can also refer to the
+                                            <a href="{{FAQ Document Link}}" style="color: #662237; font-weight: 600; text-decoration: underline;">Interview Assessment FAQ document</a>
+                                            to troubleshoot common issues.
+                                        </p>
+
+                                        <p style="margin: 0 0 24px 0; color: #4B4B4B; font-size: 14px; line-height: 22px;" class="body-text">
+                                            You can also email directly to <a href="mailto:support@fabrichq.ai" style="color: #662237; font-weight: 600; text-decoration: underline;">support@fabrichq.ai</a> for any queries.
+                                        </p>
+
+                                        <p style="margin: 0; color: #4B4B4B; font-size: 15px; line-height: 24px;" class="body-text">
+                                            Best regards,<br/>
+                                            <span style="color: #662237; font-weight: 600;">Team Meesho</span>
+                                        </p>
+
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                </table>
+
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>

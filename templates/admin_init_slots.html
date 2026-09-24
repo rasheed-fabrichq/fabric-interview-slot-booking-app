@@ -1,0 +1,88 @@
+{% extends "admin_base.html" %}
+
+{% block page_title %}Initialize Slots{% endblock %}
+{% block page_subtitle %}Generate bookable time slots for each job from its configuration and dates.{% endblock %}
+
+{% block admin_content %}
+{% include "_admin_alerts.html" %}
+
+<div class="row g-4">
+    {% for job_id, job_name in jobs.items() %}
+    {% set config = configs|selectattr('job_id', 'equalto', job_id)|first %}
+    <div class="col-md-6 col-xxl-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <span class="card-title-icon tone-success"><i class="bi bi-lightning-charge"></i></span>
+                <div class="me-auto" style="min-width:0;"><h5 class="text-truncate">{{ job_name }}</h5></div>
+            </div>
+            <div class="card-body d-flex flex-column">
+                {% if config %}
+                <div class="form-section-title">Configuration</div>
+                <div class="job-metrics mb-3">
+                    <div class="metric">
+                        <div class="metric-label">Time</div>
+                        <div class="fw-semibold small">{{ config.slot_start_time }} - {{ config.slot_end_time }}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Duration</div>
+                        <div class="fw-semibold small">{{ config.slot_duration_minutes }} minutes</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Capacity</div>
+                        <div class="fw-semibold small">{{ config.capacity_per_slot }} per slot</div>
+                    </div>
+                </div>
+
+                <p class="small text-muted mb-3">
+                    <i class="bi bi-info-circle me-1"></i>This will create time slots for all configured dates for this job.
+                </p>
+
+                <div class="mt-auto d-flex flex-column gap-2">
+                    <form method="POST" action="{{ url_for('admin_init_slots') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="job_id" value="{{ job_id }}">
+                        <button type="submit" class="btn btn-success w-100"
+                                onclick="return confirm('Initialize slots for {{ job_name }}?')">
+                            <i class="bi bi-lightning-fill"></i> Initialize Slots
+                        </button>
+                    </form>
+
+                    <div class="d-flex gap-2">
+                        <a href="/admin/slots?job_id={{ job_id }}" class="btn btn-outline-secondary btn-sm flex-fill">
+                            <i class="bi bi-eye"></i> View Slots
+                        </a>
+                        <form method="POST" action="{{ url_for('admin_clear_slots') }}" class="flex-fill">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="job_id" value="{{ job_id }}">
+                            <button type="submit" class="btn btn-outline-danger btn-sm w-100"
+                                    onclick="return confirm('Clear all slots and bookings for {{ job_name }}? This cannot be undone!')">
+                                <i class="bi bi-trash"></i> Clear Slots
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% else %}
+                <div class="callout callout-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <div>Configuration not found for this job.</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="callout callout-warning mt-4">
+    <i class="bi bi-exclamation-triangle"></i>
+    <div>
+        <div class="callout-title">Important Notes</div>
+        <ul>
+            <li>Slots must be initialized before candidates can book</li>
+            <li>Ensure job configuration and dates are set before initializing</li>
+            <li>Clearing slots will delete all bookings for that job</li>
+            <li>You can initialize each job independently</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

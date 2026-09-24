@@ -1,0 +1,339 @@
+{% extends "admin_base.html" %}
+
+{% block page_title %}Jobs{% endblock %}
+{% block page_subtitle %}Create new job positions and view existing jobs.{% endblock %}
+
+{% macro rename_button(job) %}
+<button type="button" class="btn btn-sm btn-outline-secondary"
+        data-bs-toggle="modal" data-bs-target="#renameJobModal"
+        data-job-id="{{ job.job_id }}" data-job-name="{{ job.job_name }}"
+        data-batch-name="{{ job.batch_name or '' }}" data-is-batch="{{ 1 if job.parent_job_id else 0 }}"
+        title="Rename" aria-label="Rename {{ job.job_name }}{% if job.batch_name %} – {{ job.batch_name }}{% endif %}">
+    <i class="bi bi-pencil"></i>
+</button>
+{% endmacro %}
+
+{% macro delete_button(job) %}
+{% set u = usage.get(job.job_id, {}) %}
+<button type="button" class="btn btn-sm btn-outline-danger js-delete-job"
+        data-bs-toggle="modal" data-bs-target="#deleteJobModal"
+        data-job-id="{{ job.job_id }}" data-job-name="{{ job.job_name }}{% if job.batch_name %} – {{ job.batch_name }}{% endif %}"
+        data-candidates="{{ u.candidates or 0 }}" data-bookings="{{ u.bookings or 0 }}"
+        data-slots="{{ u.slots or 0 }}" data-dates="{{ u.dates or 0 }}" data-batches="{{ u.batches or 0 }}"
+        title="Delete {{ job.job_name }}" aria-label="Delete {{ job.job_name }}">
+    <i class="bi bi-trash"></i>
+</button>
+{% endmacro %}
+
+{% block admin_content %}
+{% include "_admin_alerts.html" %}
+
+<div class="row g-4">
+    <!-- Create New Job Form -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title-icon"><i class="bi bi-plus-lg"></i></span>
+                <div><h5>Create New Job</h5><p class="card-subtitle-text">Defaults can be changed later in Job Configuration</p></div>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('admin_jobs') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="form-section">
+                        <div class="form-section-title">Identity</div>
+                        <div class="mb-3">
+                            <label class="form-label">Job ID (UUID)<span class="required-mark">*</span></label>
+                            <input type="text" name="job_id" class="form-control font-monospace"
+                                   placeholder="e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6" required>
+                            <span class="form-hint">Must be a valid UUID. Use the job ID from the application link (<code>/jobs/&lt;ID&gt;/</code>), or the assistant ID if you'll upload interview links (<code>/interviews/&lt;ID&gt;/</code>).</span>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Job Name<span class="required-mark">*</span></label>
+                            <input type="text" name="job_name" class="form-control"
+                                   placeholder="e.g., Software Development Engineer I" required>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">Company Name<span class="required-mark">*</span></label>
+                            <input type="text" name="company_name" class="form-control"
+                                   placeholder="e.g., Acme Analytics" required>
+                            <span class="form-hint">The client this job is for. Used in every email; editable later in Communications.</span>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Slot defaults</div>
+                        <div class="row g-3">
+                            <div class="col-sm-6">
+                                <label class="form-label">Slot Start Time</label>
+                                <input type="time" name="start_time" class="form-control" value="08:00">
+                                <span class="form-hint">Default: 08:00</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label">Slot End Time</label>
+                                <input type="time" name="end_time" class="form-control" value="00:00">
+                                <span class="form-hint">Use 00:00 for midnight (end of day). Default: 00:00</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label">Slot Duration (minutes)</label>
+                                <select name="duration" class="form-select">
+                                    <option value="15">15 minutes</option>
+                                    <option value="30">30 minutes</option>
+                                    <option value="40">40 minutes</option>
+                                    <option value="45">45 minutes</option>
+                                    <option value="60" selected>60 minutes</option>
+                                    <option value="90">90 minutes</option>
+                                    <option value="120">120 minutes</option>
+                                </select>
+                                <span class="form-hint">Default: 60 minutes</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label">Capacity per Slot</label>
+                                <input type="number" name="capacity" class="form-control"
+                                       value="15" min="1" max="100">
+                                <span class="form-hint">Max candidates per slot. Default: 15</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 mt-4">
+                        <i class="bi bi-plus-circle"></i> Create Job
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="callout callout-info mt-3">
+            <i class="bi bi-info-circle"></i>
+            <div>
+                <div class="callout-title">How to get a UUID</div>
+                <ul>
+                    <li>Generate online: <a href="https://www.uuidgenerator.net/" target="_blank">uuidgenerator.net</a></li>
+                    <li>Linux/Mac: Run <code>uuidgen</code> in terminal</li>
+                    <li>Python: <code>import uuid; print(uuid.uuid4())</code></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Existing Jobs List -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title-icon tone-neutral"><i class="bi bi-briefcase"></i></span>
+                <div class="me-auto"><h5>Existing Jobs</h5></div>
+                <span class="status-pill pill-primary no-dot">{{ jobs|length }}</span>
+            </div>
+            {% if jobs %}
+            {% set batches_by_parent = {} %}
+            {% for c in configs if c.parent_job_id %}
+                {% set _ = batches_by_parent.setdefault(c.parent_job_id, []).append(c) %}
+            {% endfor %}
+            <div class="list-group list-group-flush">
+                {% for job in configs if not job.parent_job_id %}
+                {% set batches = batches_by_parent.get(job.job_id, []) %}
+                <div class="list-group-item py-3 px-4">
+                    <div class="d-flex align-items-start justify-content-between gap-2">
+                        <div class="min-w-0">
+                            <div class="fw-semibold">
+                                {{ job.job_name }}
+                                {% if job.batch_name %}<span class="text-muted fw-normal">– {{ job.batch_name }}</span>{% endif %}
+                                {% if batches %}<span class="status-pill pill-info no-dot ms-1">{{ batches|length + 1 }} batches</span>{% endif %}
+                            </div>
+                            <div class="id-mono" title="Link ID: the ID in candidates' links and booking links">{{ job.link_id }}</div>
+                        </div>
+                        <div class="d-flex gap-1 flex-shrink-0">
+                            <button class="btn btn-sm btn-outline-primary" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#batch-form-{{ loop.index }}"
+                                    aria-expanded="false" aria-controls="batch-form-{{ loop.index }}">
+                                <i class="bi bi-diagram-2"></i> Add batch
+                            </button>
+                            {{ rename_button(job) }}
+                            {{ delete_button(job) }}
+                        </div>
+                    </div>
+
+                    <div class="collapse" id="batch-form-{{ loop.index }}">
+                        <form method="POST" action="{{ url_for('admin_jobs') }}" class="mt-3 p-3 rounded border bg-body-tertiary">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="add_batch">
+                            <input type="hidden" name="parent_job_id" value="{{ job.job_id }}">
+                            <label class="form-label fw-semibold" for="batch-name-{{ loop.index }}">Batch label</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="batch-name-{{ loop.index }}" name="batch_name"
+                                       value="Batch {{ batches|length + 2 }}" placeholder="e.g. Saturday" required>
+                                <button type="submit" class="btn btn-primary">Create batch</button>
+                            </div>
+                            <div class="form-hint mt-2">
+                                The label is for you only; candidates still see the job name
+                                "{{ job.job_name }}". Copies slot settings, branding, email templates
+                                and reminder settings. Dates are not copied. Candidates keep the same link format and booking link;
+                                each is routed to the batch they were uploaded into.
+                            </div>
+                        </form>
+                    </div>
+
+                    {% if batches %}
+                    <ul class="list-unstyled mb-0 mt-3 ps-3 border-start">
+                        {% for b in batches %}
+                        <li class="py-1 d-flex align-items-center gap-1">
+                            <i class="bi bi-arrow-return-right text-muted"></i>
+                            <span class="fw-medium">{{ b.batch_name }}</span>
+                            <span class="status-pill pill-neutral no-dot ms-1 me-auto">Batch</span>
+                            {{ rename_button(b) }}
+                            {{ delete_button(b) }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon"><i class="bi bi-briefcase"></i></div>
+                <h5>No jobs found.</h5>
+                <p>Create your first job using the form.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="callout callout-warning mt-3">
+            <i class="bi bi-signpost-split"></i>
+            <div>
+                <div class="callout-title">Next steps after creating a job</div>
+                <ul>
+                    <li>Configure dates in <a href="{{ url_for('admin_job_dates') }}"><strong>Interview Dates</strong></a></li>
+                    <li>Then initialize slots in <a href="{{ url_for('admin_init_slots') }}"><strong>Initialize Slots</strong></a></li>
+                    <li>Finally, <a href="{{ url_for('admin_upload') }}">upload candidates</a> for the job</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="callout callout-info mt-3">
+            <i class="bi bi-diagram-2"></i>
+            <div>
+                <div class="callout-title">Batches: different slots for different candidates of one job</div>
+                <ul>
+                    <li>Use <strong>Add batch</strong> when some of a job's candidates should see different dates or times.</li>
+                    <li>Each batch has its own dates, slots, capacity and emails. The original job counts as the first batch.</li>
+                    <li>Upload each batch's candidates into that batch. Their links and booking links stay the same;
+                        a candidate sees only their own batch's slots.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Rename job -->
+<div class="modal fade" id="renameJobModal" tabindex="-1" aria-labelledby="renameJobModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="POST" action="{{ url_for('admin_jobs') }}" class="modal-content">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="rename_job">
+            <input type="hidden" name="job_id" id="rename-job-id">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="renameJobModalLabel">Rename job</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label fw-semibold" for="rename-job-name">Job name</label>
+                <input type="text" class="form-control" name="job_name" id="rename-job-name" required>
+                <div class="form-hint mb-3">What candidates see on the booking page and in emails. Shared by all batches of this job.</div>
+                <label class="form-label fw-semibold" for="rename-batch-name">Batch label <span class="text-muted fw-normal" id="rename-batch-optional">(optional)</span></label>
+                <input type="text" class="form-control" name="batch_name" id="rename-batch-name" placeholder="e.g. Friday">
+                <div class="form-hint">Admin only; tells this job's batches apart.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delete job confirmation -->
+<div class="modal fade" id="deleteJobModal" tabindex="-1" aria-labelledby="deleteJobModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="POST" action="{{ url_for('admin_jobs') }}" class="modal-content">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="delete_job">
+            <input type="hidden" name="job_id" id="delete-job-id">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="deleteJobModalLabel">Delete <span id="delete-job-name"></span>?</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">This permanently deletes the job and everything in it:</p>
+                <ul class="mb-3">
+                    <li><strong id="delete-candidates"></strong> uploaded candidate(s)</li>
+                    <li><strong id="delete-slots"></strong> slot(s) on <strong id="delete-dates"></strong> date(s)</li>
+                    <li>Its email templates, settings and reminder history</li>
+                </ul>
+                <div class="callout callout-danger d-none" id="delete-bookings-warning">
+                    <i class="bi bi-exclamation-octagon"></i>
+                    <div>
+                        <div class="callout-title"><span id="delete-bookings"></span> candidate(s) have already booked a slot.</div>
+                        Their bookings will be deleted and they will <strong>not</strong> be notified.
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" name="confirm_bookings" value="yes" id="confirm-bookings">
+                            <label class="form-check-label" for="confirm-bookings">I understand booked candidates will lose their slots</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="callout callout-info d-none mt-3" id="delete-batches-note">
+                    <i class="bi bi-diagram-2"></i>
+                    <div>This job has <span id="delete-batches"></span> batch(es). They are kept, and the first one becomes the main job.</div>
+                </div>
+                <p class="text-danger small mb-0 mt-3">This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-danger" id="delete-job-submit"><i class="bi bi-trash"></i> Delete job</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    document.getElementById('renameJobModal').addEventListener('show.bs.modal', function (event) {
+        const d = event.relatedTarget.dataset;
+        const isBatch = d.isBatch === '1';
+        document.getElementById('rename-job-id').value = d.jobId;
+        document.getElementById('rename-job-name').value = d.jobName;
+        const batch = document.getElementById('rename-batch-name');
+        batch.value = d.batchName;
+        batch.required = isBatch;
+        document.getElementById('rename-batch-optional').textContent = isBatch ? '' : '(optional)';
+    });
+
+    const modal = document.getElementById('deleteJobModal');
+    const confirmBox = document.getElementById('confirm-bookings');
+    const submit = document.getElementById('delete-job-submit');
+    function syncSubmit(hasBookings) {
+        submit.disabled = hasBookings && !confirmBox.checked;
+    }
+    modal.addEventListener('show.bs.modal', function (event) {
+        const d = event.relatedTarget.dataset;
+        const bookings = parseInt(d.bookings, 10) || 0;
+        const batches = parseInt(d.batches, 10) || 0;
+        document.getElementById('delete-job-id').value = d.jobId;
+        document.getElementById('delete-job-name').textContent = d.jobName;
+        document.getElementById('delete-candidates').textContent = d.candidates;
+        document.getElementById('delete-slots').textContent = d.slots;
+        document.getElementById('delete-dates').textContent = d.dates;
+        document.getElementById('delete-bookings').textContent = bookings;
+        document.getElementById('delete-batches').textContent = batches;
+        document.getElementById('delete-bookings-warning').classList.toggle('d-none', !bookings);
+        document.getElementById('delete-batches-note').classList.toggle('d-none', !batches);
+        confirmBox.checked = false;
+        confirmBox.required = bookings > 0;
+        syncSubmit(bookings > 0);
+        confirmBox.onchange = function () { syncSubmit(bookings > 0); };
+    });
+})();
+</script>
+{% endblock %}

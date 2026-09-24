@@ -1,0 +1,42 @@
+# systemd unit for the slot reminder worker.
+#
+# Install on the VM:
+#
+#   sudo cp deploy/reminder-worker.service /etc/systemd/system/
+#   sudo nano /etc/systemd/system/reminder-worker.service   # fix paths/user
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now reminder-worker
+#
+# Check it:
+#
+#   sudo systemctl status reminder-worker
+#   sudo journalctl -u reminder-worker -f
+#
+# The worker reads .env from WorkingDirectory, so it picks up the same
+# SES credentials as the web app.
+
+[Unit]
+Description=Interview slot reminder worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Adjust these three to match the deployment.
+User=ubuntu
+WorkingDirectory=/home/ubuntu/fabric-interview-slot-booking-app
+ExecStart=/home/ubuntu/fabric-interview-slot-booking-app/env/bin/python reminder_worker.py
+
+# Reminders are time-critical, so always come back up.
+Restart=always
+RestartSec=10
+
+# Unbuffered, so log lines reach journald as they happen.
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

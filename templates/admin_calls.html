@@ -1,0 +1,238 @@
+{% extends "admin_base.html" %}
+
+{% block page_title %}Call Log{% endblock %}
+{% block page_subtitle %}Every reminder call placed, and what became of it. Status is
+polled from the calling system until the call ends.
+<strong>Answered</strong> means the candidate picked up and
+stayed on the line &mdash; a call that rang out, was rejected or
+hit voicemail counts as not answered.{% endblock %}
+{% block page_actions %}
+<a href="/admin/notifications" class="btn btn-outline-secondary"><i class="bi bi-bell"></i> Reminder Log</a>
+<a href="{{ url_for('admin_communications', tab='call') }}" class="btn btn-outline-secondary"><i class="bi bi-gear"></i> Call Settings</a>
+{% endblock %}
+
+{% block admin_content %}
+<!-- Summary -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="stat-card stat-compact stat-primary">
+            <div class="stat-icon"><i class="bi bi-telephone-outbound"></i></div>
+            <div><p class="stat-label">Calls placed</p><p class="stat-value">{{ stats.total }}</p></div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="stat-card stat-compact stat-success">
+            <div class="stat-icon"><i class="bi bi-telephone-inbound"></i></div>
+            <div><p class="stat-label">Answered</p><p class="stat-value">{{ stats.answered }}</p></div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="stat-card stat-compact stat-warning">
+            <div class="stat-icon"><i class="bi bi-telephone-x"></i></div>
+            <div><p class="stat-label">Not answered</p><p class="stat-value" {% if stats.not_answered %}style="color: var(--warning);"{% endif %}>{{ stats.not_answered }}</p></div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="stat-card stat-compact stat-info">
+            <div class="stat-icon"><i class="bi bi-arrow-repeat"></i></div>
+            <div><p class="stat-label">In progress</p><p class="stat-value">{{ stats.in_progress }}</p></div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filter-bar">
+    <form method="GET" class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label">Job</label>
+            <select name="job_id" class="form-select form-select-sm">
+                <option value="">All jobs</option>
+                {% for jid, jname in jobs.items() %}
+                <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label">Status</label>
+            <select name="status" class="form-select form-select-sm">
+                <option value="">All</option>
+                {% for s in ['queued', 'in_progress', 'completed', 'failed', 'cancelled'] %}
+                <option value="{{ s }}" {% if selected_status == s %}selected{% endif %}>{{ s|replace('_', ' ')|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label">Outcome</label>
+            <select name="outcome" class="form-select form-select-sm">
+                <option value="">All</option>
+                <option value="answered" {% if selected_outcome == 'answered' %}selected{% endif %}>Answered</option>
+                <option value="not_answered" {% if selected_outcome == 'not_answered' %}selected{% endif %}>Not answered</option>
+            </select>
+        </div>
+        <div class="col-md-4 d-flex gap-2">
+            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Filter</button>
+            <a href="/admin/calls" class="btn btn-sm btn-outline-secondary">Clear</a>
+        </div>
+    </form>
+</div>
+
+<div class="card table-card">
+    {% if calls %}
+    <div class="table-responsive table-scroll">
+        <table class="table table-hover table-modern align-middle">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Candidate</th>
+                    <th>Phone</th>
+                    <th>Slot</th>
+                    <th>Status</th>
+                    <th>Outcome</th>
+                    <th>Duration</th>
+                    <th>Placed</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for call in calls %}
+                <tr>
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td>
+                        <span class="cell-strong">{{ call.name or '(candidate removed)' }}</span>
+                        {% if call.job_name %}
+                        <br><small class="text-muted">{{ call.job_name }}</small>
+                        {% endif %}
+                    </td>
+                    <td><small class="font-monospace">{{ call.phone or '—' }}</small></td>
+                    <td class="text-nowrap"><small>{{ call.slot_date }} {{ call.slot_start_time }}</small></td>
+                    <td>
+                        {% if call.status == 'completed' %}
+                            <span class="status-pill status-completed">Completed</span>
+                        {% elif call.status == 'failed' %}
+                            <span class="status-pill status-failed">Failed</span>
+                        {% elif call.status == 'cancelled' %}
+                            <span class="status-pill status-cancelled">Cancelled</span>
+                        {% elif call.status == 'in_progress' %}
+                            <span class="status-pill status-in_progress">In progress</span>
+                        {% else %}
+                            <span class="status-pill status-queued">Queued</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if call.call_successful == 1 %}
+                            <span class="status-pill status-answered">Answered</span>
+                        {% elif call.call_successful == 0 %}
+                            <span class="status-pill status-not_answered"
+                                  title="{{ call.hangup_reason or '' }}">
+                                {{ call.hangup_reason or 'Not answered' }}
+                            </span>
+                        {% else %}
+                            <small class="text-muted">—</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if call.duration_seconds %}
+                        <small>{{ call.duration_seconds|round(0)|int }}s</small>
+                        {% else %}
+                        <small class="text-muted">—</small>
+                        {% endif %}
+                    </td>
+                    <td class="text-nowrap"><small>{{ call.placed_at }}</small></td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary text-nowrap"
+                                data-bs-toggle="collapse"
+                                data-bs-target="#detail-{{ call.id }}">
+                            <i class="bi bi-chevron-down"></i> View
+                        </button>
+                    </td>
+                </tr>
+                <tr class="collapse table-detail-row" id="detail-{{ call.id }}">
+                    <td colspan="9">
+                        <div class="row g-4">
+                            <div class="col-md-5">
+                                <div class="form-section-title">What the agent was told</div>
+                                {% if call.variables %}
+                                <dl class="kv-list mb-4">
+                                    {% for key, value in call.variables.items() %}
+                                    <dt>{{ key|replace('_', ' ') }}</dt>
+                                    <dd>{{ value }}</dd>
+                                    {% endfor %}
+                                </dl>
+                                {% else %}
+                                <p class="text-muted small">No payload recorded.</p>
+                                {% endif %}
+
+                                <div class="form-section-title">Call</div>
+                                <dl class="kv-list mb-3">
+                                    <dt>Execution ID</dt>
+                                    <dd><span class="id-mono">{{ call.execution_id }}</span></dd>
+                                    {% if call.hangup_reason %}
+                                    <dt>Hangup reason</dt>
+                                    <dd>{{ call.hangup_reason }}</dd>
+                                    {% endif %}
+                                    {% if call.cost %}
+                                    <dt>Cost</dt>
+                                    <dd>{{ call.cost }}</dd>
+                                    {% endif %}
+                                    {% if call.completed_at %}
+                                    <dt>Completed</dt>
+                                    <dd>{{ call.completed_at }}</dd>
+                                    {% endif %}
+                                    {% if call.error %}
+                                    <dt>Last error</dt>
+                                    <dd class="text-danger">{{ call.error }}</dd>
+                                    {% endif %}
+                                </dl>
+
+                                {% if call.recording_available %}
+                                <div class="form-section-title">Recording</div>
+                                {# Served through our own route: the
+                                   provider's URL expires. #}
+                                <audio controls preload="none" class="w-100 mb-2">
+                                    <source src="/admin/call-recording/{{ call.execution_id }}">
+                                    Your browser cannot play this recording.
+                                </audio>
+                                <a href="/admin/call-recording/{{ call.execution_id }}"
+                                   class="btn btn-sm btn-outline-secondary" download>
+                                    <i class="bi bi-download"></i> Download
+                                </a>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-7">
+                                <div class="form-section-title">Transcript</div>
+                                {% if call.transcript %}
+                                <pre class="bg-white border rounded-3 p-3 small mb-0"
+                                     style="max-height: 400px; overflow-y: auto; white-space: pre-wrap;">{{ call.transcript }}</pre>
+                                {% else %}
+                                <p class="text-muted small">
+                                    No transcript &mdash; the call was not
+                                    answered, or the conversation was too
+                                    short to record anything.
+                                </p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="table-footer">Showing {{ calls|length }} call(s).</p>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon"><i class="bi bi-telephone"></i></div>
+        <h5>No calls placed yet.</h5>
+        <p>
+        {% if selected_job or selected_status or selected_outcome %}
+        <a href="/admin/calls">Clear the filters</a> to see all calls.
+        {% else %}
+        Calls appear here once the reminder worker places its first
+        one. Check <code>CALLS_ENABLED</code> is set and the worker
+        is running.
+        {% endif %}
+        </p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

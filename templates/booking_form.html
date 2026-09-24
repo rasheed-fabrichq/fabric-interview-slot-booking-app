@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Book Your AI Discussion Slot{% endblock %}
+
+{% block content %}
+{% set _b = branding if branding is defined and branding else {} %}
+{% set _support = _b.get('support_email') or 'support@fabrichq.ai' %}
+<div class="candidate-wrap booking-flow">
+    <div class="card candidate-card">
+        <div class="candidate-hero">
+            <div class="hero-eyebrow"><i class="bi bi-calendar2-week"></i>{% if _b.get('company_name') %} {{ _b.get('company_name') }} ·{% endif %} AI Discussion</div>
+            <h1>Book Your AI Discussion Slot</h1>
+            <p>First select an AI discussion date, then choose your preferred time slot.</p>
+        </div>
+        <div class="card-body">
+            <!-- Candidate Info (Read-only) -->
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label"><i class="bi bi-person"></i>Name</div>
+                    <div class="info-value">{{ candidate.name }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label"><i class="bi bi-envelope"></i>Email</div>
+                    <div class="info-value">{{ candidate.email }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label"><i class="bi bi-briefcase"></i>Position</div>
+                    <div class="info-value">{{ job_name }}</div>
+                </div>
+            </div>
+
+            <!-- Step indicator (step 2 highlights via CSS while #slot-container is visible) -->
+            <div class="booking-steps" aria-hidden="true">
+                <div class="booking-step step-1 is-current"><span class="step-num">1</span><span>Pick a date</span></div>
+                <div class="booking-step-line"></div>
+                <div class="booking-step step-2"><span class="step-num">2</span><span>Pick a time</span></div>
+            </div>
+
+            <!-- Date Selection -->
+            <div id="date-selection-container" class="mb-2">
+                <h2 class="flow-heading">Step 1: Select AI Discussion Date</h2>
+                <p class="flow-help">Click on a date to view available time slots for that day.</p>
+                <div id="dates-grid" class="row g-2">
+                    <!-- Dates will be loaded here via JavaScript -->
+                </div>
+            </div>
+
+            <!-- Selected Date Display -->
+            <div id="selected-date-info" class="selected-date-bar d-none mb-3">
+                <i class="bi bi-calendar-check"></i>
+                <span><strong>Selected Date:</strong> <span id="selected-date-display"></span></span>
+            </div>
+
+            <!-- Slot Selection -->
+            <div id="slot-container" class="d-none">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-1 flex-wrap">
+                    <h2 class="flow-heading">Step 2: Select Time Slot</h2>
+                    <button type="button" id="back-to-dates-btn" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-arrow-left"></i> Back to Dates
+                    </button>
+                </div>
+                <p class="flow-help mb-2">Tap a time slot to select it.</p>
+                <div class="slot-legend">
+                    <span><i class="sw sw-available"></i>Available</span>
+                    <span><i class="sw sw-almost"></i>Almost full</span>
+                    <span><i class="sw sw-full"></i>Full</span>
+                    <span><i class="sw sw-selected"></i>Selected</span>
+                </div>
+
+                <div id="slots-grid" class="row g-2">
+                    <!-- Slots will be loaded here via JavaScript -->
+                </div>
+
+                <div id="selected-slot-info" class="confirm-panel" style="display: none;">
+                    <div class="confirm-label">Selected Slot</div>
+                    <div class="confirm-time"><i class="bi bi-clock me-1"></i><span id="selected-slot-time"></span></div>
+                    <div class="confirm-actions">
+                        <button type="button" id="confirm-booking-btn" class="btn btn-success btn-lg">
+                            Confirm Booking
+                        </button>
+                        <button type="button" id="change-date-btn" class="btn btn-outline-secondary btn-lg">
+                            Change Date
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading spinner -->
+            <div id="loading-spinner" class="text-center d-none">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 mb-0 small">Loading...</p>
+            </div>
+
+            <div class="help-strip">
+                <i class="bi bi-question-circle"></i>
+                <div>
+                    Need help? Read the
+                    <a href="{{ _b.get('faq_link') or 'https://docs.google.com/document/d/1xVZV7QoXUbp6csqoBzrn2Xd42e2n4F5edm3t6q-_hxs/edit?usp=sharing' }}" target="_blank" rel="noopener noreferrer" class="fw-semibold">Candidate Help FAQ</a>
+                    or email <a href="mailto:{{ _support }}" class="fw-semibold">{{ _support }}</a>.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Success Modal -->
+<div class="modal fade" id="successModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4">
+                <div class="result-icon tone-success"><i class="bi bi-check-lg"></i></div>
+                <h5 class="modal-title mb-2">Booking Confirmed!</h5>
+                <p id="success-message" class="text-muted"></p>
+                <dl class="kv-list text-start bg-light border rounded-3 p-3 mb-3">
+                    <dt>Job</dt><dd><span id="modal-job-name"></span></dd>
+                    <dt>Start Time</dt><dd><span id="modal-start-time"></span></dd>
+                    <dt>End Time</dt><dd><span id="modal-end-time"></span></dd>
+                </dl>
+                <div class="callout callout-warning text-start mb-0">
+                    <i class="bi bi-envelope-paper"></i>
+                    <div>
+                        <div class="callout-title">Your assessment link is on its way.</div>
+                        You will receive a confirmation email with your unique
+                        assessment link shortly. Please check your spam folder if you
+                        do not see it, and contact
+                        <strong>{{ _support }}</strong> if it has not arrived.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary w-100" onclick="window.location.reload()">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Error Modal -->
+<div class="modal fade" id="errorModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title d-flex align-items-center gap-2"><i class="bi bi-exclamation-octagon text-danger"></i>Booking Failed</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="error-message" class="mb-0"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden inputs for JavaScript -->
+<input type="hidden" id="candidate-id" value="{{ candidate.candidate_id }}">
+<input type="hidden" id="job-id" value="{{ job_id }}">
+<input type="hidden" id="job-name" value="{{ job_name }}">
+<input type="hidden" id="booking-token" value="{{ booking_token }}">
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/booking.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,149 @@
+{% extends "admin_base.html" %}
+
+{% block page_title %}Upload Candidates{% endblock %}
+{% block page_subtitle %}Import a CSV or Excel file of candidates for one job position.{% endblock %}
+{% block page_actions %}
+<a href="/admin/candidates" class="btn btn-outline-secondary"><i class="bi bi-people"></i> View Candidates</a>
+{% endblock %}
+
+{% block admin_content %}
+<div class="row g-4">
+    <div class="col-xl-8">
+        {% if success %}
+        <div class="alert alert-success d-flex align-items-start gap-2"><i class="bi bi-check-circle-fill mt-1"></i><div>{{ success }}</div></div>
+        {% endif %}
+
+        {% if error %}
+        <div class="alert alert-danger d-flex align-items-start gap-2"><i class="bi bi-exclamation-octagon-fill mt-1"></i><div>{{ error }}</div></div>
+        {% endif %}
+
+        {% if errors %}
+        <div class="alert alert-warning">
+            <div class="d-flex align-items-center gap-2"><i class="bi bi-exclamation-triangle-fill"></i><strong>Validation Errors (showing first 50):</strong></div>
+            <ul class="error-list">
+                {% for err in errors %}
+                <li>{{ err }}</li>
+                {% endfor %}
+            </ul>
+            <p class="mt-2 mb-0 small text-muted">Tip: Copy errors to fix them in your file, then re-upload.</p>
+        </div>
+        {% endif %}
+
+        {% if warnings %}
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center gap-2"><i class="bi bi-telephone-x"></i><strong>Phone number warnings (showing first 50):</strong></div>
+            <p class="mb-0 mt-1 small">These candidates were created and can
+            book normally &mdash; they just will not receive a reminder
+            call. Fix the numbers and re-upload only if you need the
+            calls.</p>
+            <ul class="error-list" style="max-height: 300px;">
+                {% for warn in warnings %}
+                <li>{{ warn }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title-icon"><i class="bi bi-cloud-arrow-up"></i></span>
+                <div><h5>Upload Candidate List</h5><p class="card-subtitle-text">Candidates are created with status <em>pending</em></p></div>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="form-section">
+                        <div class="form-section-title">1 · Job</div>
+                        <label for="job_id" class="form-label">Select Job Position</label>
+                        <select class="form-select" id="job_id" name="job_id" required>
+                            <option value="">-- Select a job --</option>
+                            {% for job_id, job_name in jobs.items() %}
+                            <option value="{{ job_id }}">{{ job_name }}</option>
+                            {% endfor %}
+                        </select>
+                        <span class="form-hint">Candidates will be uploaded for this specific job position</span>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">2 · File</div>
+                        <label for="file" class="form-label">Select CSV or Excel File</label>
+                        <input type="file" class="form-control" id="file" name="file" accept=".csv,.xlsx,.xls" required>
+                        <span class="form-hint">Accepted: .csv, .xlsx, .xls · max 16 MB</span>
+                    </div>
+
+                    <div class="callout callout-info mt-4">
+                        <i class="bi bi-file-earmark-spreadsheet"></i>
+                        <div>
+                            <div class="callout-title">File Requirements</div>
+                            <ul>
+                                <li>Format: CSV or Excel (.xlsx, .xls)</li>
+                                <li>Required columns: <code>Name</code>, <code>Email</code>,
+                                    <code>Job Application Link</code>
+                                    <span class="text-muted">(column names are not case-sensitive)</span></li>
+                                <li>Optional column: <code>Phone</code> &mdash; needed only
+                                    for the reminder call. Accepts
+                                    <code>9876543210</code>, <code>09876543210</code>,
+                                    <code>+91 98765 43210</code> and similar; all are
+                                    stored as <code>+919876543210</code>. A number that
+                                    cannot be read is reported as a warning and the
+                                    candidate is still created.</li>
+                                <li>The link column can hold either link type:
+                                    an application link
+                                    <code>/jobs/&lt;JOB_ID&gt;/?candidate_id=&lt;ID&gt;</code>
+                                    or an interview link
+                                    <code>/interviews/&lt;ASSISTANT_ID&gt;/?candidate_id=&lt;ID&gt;</code>.
+                                    Both IDs must be valid UUIDs</li>
+                                <li>The ID in each link's path must equal the selected
+                                    job's ID. For interview links, create the job with
+                                    the assistant ID as its Job ID</li>
+                                <li>For a batch, links use the original job's ID, same as
+                                    every other batch. Upload each batch's candidates into
+                                    that batch; a candidate can be in only one batch</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg mt-4">
+                        <i class="bi bi-upload"></i> Upload Candidates
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <span class="card-title-icon tone-neutral"><i class="bi bi-filetype-csv"></i></span>
+                <h5>Sample CSV Format</h5>
+            </div>
+            <div class="card-body">
+                <pre class="code-block">Name,Email,Phone,Job Application Link
+John Doe,john@example.com,+919876543210,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candidate_id=7f3e9a2c-4b1d-4f8e-9a2c-4b1d4f8e9a2c
+Jane Smith,jane@example.com,9876543211,https://app.fabrichq.ai/interviews/&lt;ASSISTANT_UUID&gt;/?candidate_id=8a4f0b3d-5c2e-4a9f-8b3d-5c2e4a9f8b3d</pre>
+                <p class="form-hint mb-0">Use one link type per job: application links carry the job ID, interview links carry the assistant ID.</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title-icon tone-info"><i class="bi bi-link-45deg"></i></span>
+                <h5>Booking Link Format</h5>
+            </div>
+            <div class="card-body">
+                <p class="small mb-2 fw-semibold">After uploading candidates, send them slot booking links in this format:</p>
+                <pre class="code-block">{{ booking_base_url() }}/book?candidate_id=<span class="tok-a">CANDIDATE_UUID</span>&job_id=<span class="tok-b">JOB_UUID</span></pre>
+
+                <p class="small mb-2 mt-3 fw-semibold">Example for Software Development Engineer I:</p>
+                <pre class="code-block">{{ booking_base_url() }}/book?candidate_id=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d&job_id=e34e8e92-95ff-47f5-8e2f-86baa397c2a0</pre>
+
+                <div class="callout callout-warning small mt-3">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <div>The job_id parameter must match the job you selected during upload. Both job_id and candidate_id must be valid UUIDs.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

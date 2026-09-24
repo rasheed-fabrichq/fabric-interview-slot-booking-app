@@ -1,0 +1,1958 @@
+"""
+Main Flask application for Multi-Job Interview Slot Booking System
+"""
+# dotenv MUST be loaded first, before any module that reads os.environ
+from dotenv import load_dotenv
+load_dotenv()
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, session, Response
+import io
+import json
+from flask_wtf.csrf import CSRFProtect
+from werkzeug.utils import secure_filename
+import pandas as pd
+import os
+import secrets
+import re
+import threading
+from uuid import UUID
+from datetime import datetime, timedelta
+from functools import wraps
+
+# Import from local modules
+from database import (
+    init_database, add_candidate, get_candidate, update_candidate_status,
+    get_slots_by_job_and_date, book_slot, get_all_bookings,
+    initialize_slots_for_job, get_dashboard_stats,
+    get_booking_by_candidate_and_job, clear_slots_for_job, release_booking,
+    is_booking_enabled, set_booking_enabled, get_all_candidates,
+    get_job_config, get_all_job_configs, update_job_config,
+    get_job_dates, add_job_date, delete_job_date,
+    is_booking_enabled_for_job, set_job_booking_enabled,
+    get_candidate_booking_for_job, get_all_slots_for_job,
+    create_job, update_job_date_times,
+    update_booking_email_status, get_booking_with_details,
+    get_notifications_for_bookings, release_notification,
+    get_notification_log, get_notification_stats,
+    get_call_logs, get_call_log, get_call_stats,
+    get_job_communication, update_job_communication,
+    save_job_email_template, delete_job_email_template,
+    copy_job_communication, EMAIL_TEMPLATE_KINDS,
+    create_batch, link_id_exists, find_candidate_by_link,
+    find_candidate_other_batch,
+    get_followup_recipients, get_followup_audience_counts,
+    create_followup_run, record_followup_send, finish_followup_run,
+    get_followup_runs, FOLLOWUP_AUDIENCES,
+    get_job_usage, delete_job, delete_candidates,
+    get_job_title, rename_job, set_slots_blocked, count_bookings_on_date,
+    set_held_seats,
+)
+from job_call_settings import update_job_call_config, get_job_call_config
+from caller_utils import get_recording_url
+from config import (
+    get_jobs, is_valid_job_id, get_job_name,
+    ADMIN_USERNAME, ADMIN_PASSWORD
+)
+from email_utils import (
+    send_booking_confirmation, get_template, get_job_branding,
+    find_unknown_placeholders, render_sample, send_test_email,
+    placeholders_for, send_booking_followup, last_message_id,
+)
+from phone_utils import normalize_phone
+
+# Delay between a booking and its confirmation email, in seconds.
+# Override with EMAIL_CONFIRMATION_DELAY_SECONDS in .env; 0 sends
+# immediately. Note the send runs on a daemon thread, so a longer delay
+# means a restart within that window drops the email.
+DEFAULT_EMAIL_DELAY_SECONDS = 10
+
+app = Flask(__name__)
+app.secret_key = 'your-secret-key-change-in-production'  # Change this!
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+# CSRF Protection Configuration
+app.config['WTF_CSRF_ENABLED'] = True
+app.config['WTF_CSRF_TIME_LIMIT'] = None  # No time limit for booking forms
+csrf = CSRFProtect(app)
+
+# Ensure upload folder exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Initialize database on startup
+init_database()
+
+
+def get_email_delay_seconds():
+    """How long to wait after a booking before sending the confirmation.
+
+    Read at call time rather than import time so it can be changed in .env
+    and picked up on the next booking without editing code. Falls back to
+    the default if unset or not a number.
+    """
+    raw = os.environ.get('EMAIL_CONFIRMATION_DELAY_SECONDS', '')
+    try:
+        value = int(str(raw).strip())
+        return value if value >= 0 else DEFAULT_EMAIL_DELAY_SECONDS
+    except (TypeError, ValueError):
+        if str(raw).strip():
+            print(f"[EMAIL] Ignoring invalid EMAIL_CONFIRMATION_DELAY_SECONDS="
+                  f"{raw!r}; using {DEFAULT_EMAIL_DELAY_SECONDS}s")
+        return DEFAULT_EMAIL_DELAY_SECONDS
+
+
+def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, slot_duration, delay_seconds=None):
+    """Send booking confirmation email in a background thread, with optional delay."""
+    import time
+    if delay_seconds is None:
+        delay_seconds = get_email_delay_seconds()
+    print(f"[EMAIL] Thread started for candidate={candidate_id} job={job_id}. Waiting {delay_seconds}s before sending...")
+    if delay_seconds:
+        time.sleep(delay_seconds)
+    print(f"[EMAIL] Delay done. Fetching booking details for candidate={candidate_id} job={job_id}")
+
+    try:
+        booking = get_booking_with_details(candidate_id, job_id)
+        if not booking:
+            print(f"[EMAIL] ERROR: No booking found for candidate={candidate_id} job={job_id}. Aborting.")
+            return
+
+        print(f"[EMAIL] Booking found: name={booking['name']} email={booking['email']} date={booking['date']} time={booking['start_time']}")
+
+        start_dt = datetime.strptime(f"{slot_date} {slot_time}", "%d-%m-%Y %H:%M")
+        end_dt = start_dt + timedelta(minutes=slot_duration)
+        start_time_fmt = start_dt.strftime("%I:%M %p")
+        end_time_fmt = end_dt.strftime("%I:%M %p")
+
+        interview_link_with_expiry = add_expiry_to_interview_link(
+            booking.get('interview_link', ''),
+            start_dt,
+            end_dt
+        )
+        print(f"[EMAIL] Interview link built: {interview_link_with_expiry[:80]}...")
+
+        print(f"[EMAIL] Calling send_booking_confirmation for {booking['email']}...")
+        success, error = send_booking_confirmation(
+            candidate_name=booking['name'],
+            candidate_email=booking['email'],
+            job_name=booking['job_name'],
+            slot_date=slot_date,
+            day_of_week=booking['day_of_week'],
+            start_time=start_time_fmt,
+            end_time=end_time_fmt,
+            interview_link_with_expiry=interview_link_with_expiry,
+            job_id=job_id,
+            duration_minutes=slot_duration,
+        )
+
+        if success:
+            print(f"[EMAIL] SUCCESS: Confirmation email sent to {booking['email']}")
+            update_booking_email_status(candidate_id, job_id, 'sent')
+        else:
+            print(f"[EMAIL] FAILED: Could not send to {booking['email']}. Error: {error}")
+            update_booking_email_status(candidate_id, job_id, 'failed', error=error)
+
+    except Exception as e:
+        print(f"[EMAIL] EXCEPTION for candidate={candidate_id}: {e}")
+        update_booking_email_status(candidate_id, job_id, 'failed', error=str(e))
+
+
+# Admin authentication decorator
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('admin_logged_in'):
+            return redirect(url_for('admin_login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# Validation helper functions
+def is_valid_email(email):
+    """Validate email format"""
+    if not email or pd.isna(email):
+        return False
+    email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(email_regex, str(email).strip()) is not None
+
+
+def is_valid_uuid(uuid_string):
+    """Validate UUID format"""
+    if not uuid_string or pd.isna(uuid_string):
+        return False
+    try:
+        UUID(str(uuid_string).strip(), version=4)
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+def is_valid_name(name):
+    """Validate name - not empty and within character limit"""
+    if not name or pd.isna(name):
+        return False
+    name_str = str(name).strip()
+    return len(name_str) > 0 and len(name_str) <= 100
+
+
+def extract_candidate_id_and_job_from_url(interview_link):
+    """
+    Extract candidate_id and job_id from a candidate's link.
+
+    Two link types are accepted:
+      Application link: <domain>/jobs/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
+      Interview link:   <domain>/interviews/<ASSISTANT_UUID>/?candidate_id=<CANDIDATE_UUID>
+                        (singular /interview/ also accepted)
+
+    The UUID in the path is returned as job_id either way, and must be
+    some job's link ID. For interview links that means the job must be
+    created with the assistant ID as its Job ID -- the same setup used
+    for the original /interview/ links. Batches share their parent's
+    link ID, so one link format serves every batch.
+    Returns: (candidate_id, job_id, error_message) tuple
+    """
+    if not interview_link or pd.isna(interview_link):
+        return None, None, "Interview link is empty"
+
+    try:
+        url_str = str(interview_link).strip()
+
+        # Check if it's a valid URL format
+        if not url_str.startswith('http://') and not url_str.startswith('https://'):
+            return None, None, "Invalid URL format - must start with http:// or https://"
+
+        # The job (or interview assistant) ID from the URL path.
+        job_path_match = re.search(r'/(?:jobs|interviews?)/([a-f0-9\-]+)/?',
+                                   url_str, re.IGNORECASE)
+        if not job_path_match:
+            return None, None, ("ID not found in URL path - expected "
+                                "/jobs/<JOB_UUID>/ or /interviews/<ASSISTANT_UUID>/")
+
+        job_id = job_path_match.group(1).strip()
+
+        # Validate job_id is a valid UUID
+        if not is_valid_uuid(job_id):
+            return None, None, f"ID '{job_id}' in the link is not a valid UUID"
+
+        # Validate a job is addressed by this ID
+        if not link_id_exists(job_id):
+            return None, None, (f"No job has ID '{job_id}'. For interview "
+                                f"links, create the job with the assistant "
+                                f"ID from the link as its Job ID")
+
+        # Extract candidate_id from query parameter
+        candidate_match = re.search(r'[?&]candidate_id=([^&]+)', url_str)
+        if not candidate_match:
+            return None, None, "candidate_id parameter not found in URL"
+
+        candidate_id = candidate_match.group(1).strip()
+
+        # Validate the extracted candidate_id is a valid UUID
+        if not is_valid_uuid(candidate_id):
+            return None, None, f"Extracted candidate_id '{candidate_id}' is not a valid UUID"
+
+        return candidate_id, job_id, None
+
+    except Exception as e:
+        return None, None, f"Error parsing URL: {str(e)}"
+
+
+def add_expiry_to_interview_link(interview_link, start_datetime, end_datetime):
+    """
+    Add start_time and end_time parameters to interview link
+    Format: &start_time=YYYY-MM-DDTHH:mm&end_time=YYYY-MM-DDTHH:mm
+    Returns: Modified URL with expiry parameters
+    """
+    if not interview_link:
+        return ""
+
+    try:
+        url_str = str(interview_link).strip()
+
+        # Format datetime objects to required format: YYYY-MM-DDTHH:mm
+        start_time_str = start_datetime.strftime("%Y-%m-%dT%H:%M")
+        end_time_str = end_datetime.strftime("%Y-%m-%dT%H:%M")
+
+        # Add parameters to URL
+        # Check if URL already has query parameters
+        separator = '&' if '?' in url_str else '?'
+        expiry_link = f"{url_str}{separator}start_time={start_time_str}&end_time={end_time_str}"
+
+        return expiry_link
+
+    except Exception as e:
+        return interview_link  # Return original link if there's an error
+
+
+# ============= PUBLIC ROUTES =============
+
+@app.route('/')
+def index():
+    """Home page"""
+    return render_template('index.html')
+
+
+@app.route('/book')
+def booking_form():
+    """Main booking form for candidates"""
+    # Check if booking is globally enabled
+    if not is_booking_enabled():
+        return render_template('booking_closed.html')
+
+    candidate_id = request.args.get('candidate_id')
+    job_id = request.args.get('job_id')
+
+    if not candidate_id:
+        return render_template('invalid_link.html',
+                             message='Missing candidate ID in the link.')
+
+    if not job_id:
+        return render_template('invalid_link.html',
+                             message='Missing job ID in the link.')
+
+    # Validate job_id: a job's link ID, or a batch's own ID
+    if not link_id_exists(job_id) and not is_valid_job_id(job_id):
+        return render_template('invalid_link.html',
+                             message='Invalid job ID in the link.')
+
+    # The link's job_id is the job's link ID, shared by all its batches.
+    # The candidate's row says which batch they are in; from here on
+    # job_id is that batch. A job without batches resolves to itself.
+    candidate = find_candidate_by_link(candidate_id, job_id)
+
+    if not candidate:
+        return render_template('invalid_link.html',
+                             message='Invalid booking link. Please check your email for the correct link.')
+
+    job_id = candidate['job_id']
+
+    # Check if booking is enabled for this specific job
+    if not is_booking_enabled_for_job(job_id):
+        return render_template('booking_closed.html',
+                             message=f'Booking for {get_job_title(job_id)} is currently closed.',
+                             branding=get_job_branding(job_id))
+
+    # Check if already booked for THIS JOB
+    if candidate['status'] == 'booked':
+        booking = get_booking_by_candidate_and_job(candidate_id, job_id)
+
+        # Get job config for duration
+        job_config = get_job_config(job_id)
+        slot_duration = job_config['slot_duration_minutes'] if job_config else 30
+
+        # Format time to 12-hour format with AM/PM
+        if booking and booking.get('start_time'):
+            time_24h = booking['start_time']
+            time_obj = datetime.strptime(time_24h, '%H:%M')
+            booking['start_time_formatted'] = time_obj.strftime('%I:%M %p')
+
+            # Calculate end time
+            start_datetime = datetime.strptime(f"{booking['date']} {time_24h}", "%d-%m-%Y %H:%M")
+            end_datetime = start_datetime + timedelta(minutes=slot_duration)
+            booking['end_time_formatted'] = end_datetime.strftime('%I:%M %p')
+
+        return render_template('already_booked.html',
+                             candidate=candidate,
+                             booking=booking,
+                             branding=get_job_branding(job_id))
+
+    # Update status to 'clicked' if it was 'pending'
+    if candidate['status'] == 'pending':
+        update_candidate_status(candidate_id, job_id, 'clicked')
+
+    # Generate unique booking token for this session
+    booking_token = secrets.token_urlsafe(32)
+    session['booking_token'] = booking_token
+    session['booking_candidate_id'] = candidate_id
+    session['booking_job_id'] = job_id
+    session['booking_token_used'] = False
+
+    return render_template('booking_form.html',
+                         candidate=candidate,
+                         booking_token=booking_token,
+                         job_id=job_id,
+                         job_name=get_job_title(job_id),
+                         branding=get_job_branding(job_id))
+
+
+@app.route('/api/job-dates')
+def get_job_dates_api():
+    """API endpoint to get available dates for a specific job"""
+    job_id = request.args.get('job_id')
+
+    if not job_id:
+        return jsonify({'error': 'Missing job_id parameter'}), 400
+
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job_id'}), 400
+
+    # Candidate-facing: hide days with no slots left today or later.
+    dates = get_job_dates(job_id, only_bookable=True)
+    return jsonify(dates)
+
+
+@app.route('/api/slots')
+def get_slots_api():
+    """API endpoint to get available slots for a specific job and date"""
+    job_id = request.args.get('job_id')
+    date = request.args.get('date')
+
+    if not job_id:
+        return jsonify({'error': 'Missing job_id parameter'}), 400
+
+    if not date:
+        return jsonify({'error': 'Missing date parameter'}), 400
+
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job_id'}), 400
+
+    # Candidate-facing: past slots are filtered out by default.
+    slots = get_slots_by_job_and_date(job_id, date)
+    return jsonify(slots)
+
+
+@app.route('/book/confirm', methods=['POST'])
+@csrf.exempt  # Using custom booking token instead of CSRF
+def confirm_booking():
+    """Confirm slot booking with enhanced security (9-layer validation)"""
+    data = request.json
+
+    candidate_id = data.get('candidate_id')
+    job_id = data.get('job_id')
+    slot_id = data.get('slot_id')
+    booking_token = data.get('booking_token')
+
+    # Security Check 1: Validate all required fields
+    if not all([candidate_id, job_id, slot_id, booking_token]):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    # Security Check 2: Validate booking token
+    session_token = session.get('booking_token')
+    session_candidate_id = session.get('booking_candidate_id')
+    session_job_id = session.get('booking_job_id')
+    token_used = session.get('booking_token_used', True)
+
+    if not session_token or booking_token != session_token:
+        return jsonify({'error': 'Invalid or expired booking session. Please reload the booking page.'}), 403
+
+    # Security Check 3: Token not already used
+    if token_used:
+        return jsonify({'error': 'This booking session has already been used. Please reload the page.'}), 403
+
+    # Security Check 4: Validate candidate_id matches session
+    if candidate_id != session_candidate_id:
+        return jsonify({'error': 'Candidate ID mismatch. Security violation detected.'}), 403
+
+    # Security Check 5: Validate job_id matches session
+    if job_id != session_job_id:
+        return jsonify({'error': 'Job ID mismatch. Security violation detected.'}), 403
+
+    # Security Check 6: Validate candidate exists for this job
+    candidate = get_candidate(candidate_id, job_id)
+    if not candidate:
+        return jsonify({'error': 'Invalid candidate ID or job ID'}), 400
+
+    # Security Check 7: Candidate status must be 'clicked' (not 'pending')
+    if candidate['status'] == 'pending':
+        return jsonify({'error': 'Access denied. You must access the booking form through the provided link first.'}), 403
+
+    if candidate['status'] == 'booked':
+        return jsonify({'error': 'You have already booked a slot for this job.'}), 400
+
+    # Security Check 8: Validate job_id exists
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID.'}), 400
+
+    # Security Check 9: Check if booking is enabled for this job
+    if not is_booking_enabled_for_job(job_id):
+        return jsonify({'error': f'Booking for {get_job_title(job_id)} has been closed by the administrator.'}), 403
+
+    # Mark token as used to prevent reuse
+    session['booking_token_used'] = True
+
+    # Book the slot (with transaction safety)
+    result = book_slot(candidate_id, job_id, slot_id)
+
+    if 'error' in result:
+        # If booking failed, allow retry by resetting token
+        session['booking_token_used'] = False
+        return jsonify(result), 400
+
+    # Clear session data after successful booking
+    session.pop('booking_token', None)
+    session.pop('booking_candidate_id', None)
+    session.pop('booking_job_id', None)
+    session.pop('booking_token_used', None)
+
+    # Get job config for duration
+    job_config = get_job_config(job_id)
+    slot_duration = job_config['slot_duration_minutes'] if job_config else 30
+
+    # Calculate end time
+    slot_date = result['slot_date']
+    slot_time = result['slot_time']
+    start_datetime = datetime.strptime(f"{slot_date} {slot_time}", "%d-%m-%Y %H:%M")
+    end_datetime = start_datetime + timedelta(minutes=slot_duration)
+
+    # Send confirmation email in background (non-blocking)
+    email_thread = threading.Thread(
+        target=send_confirmation_email_async,
+        args=(candidate_id, job_id, slot_date, slot_time, slot_duration),
+        daemon=True
+    )
+    email_thread.start()
+
+    # Format times in 12-hour format with AM/PM
+    start_time_12h = start_datetime.strftime("%I:%M %p")
+    end_time_12h = end_datetime.strftime("%I:%M %p")
+
+    # Format dates separately (end date might be next day)
+    start_date_formatted = start_datetime.strftime("%d-%m-%Y")
+    end_date_formatted = end_datetime.strftime("%d-%m-%Y")
+
+    return jsonify({
+        'success': True,
+        'message': f'Your interview slot for {start_time_12h} on {start_date_formatted} has been confirmed.',
+        'start_time': f"{start_date_formatted} {start_time_12h}",
+        'end_time': f"{end_date_formatted} {end_time_12h}",
+        'job_name': get_job_title(job_id)
+    })
+
+
+# ============= ADMIN ROUTES =============
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    """Admin login page"""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            session['admin_logged_in'] = True
+            return redirect(url_for('admin_dashboard'))
+        else:
+            return render_template('admin_login.html',
+                                 error='Invalid credentials')
+
+    return render_template('admin_login.html')
+
+
+@app.route('/admin/logout')
+def admin_logout():
+    """Admin logout"""
+    session.pop('admin_logged_in', None)
+    return redirect(url_for('admin_login'))
+
+
+@app.route('/admin/dashboard')
+@admin_required
+def admin_dashboard():
+    """Admin dashboard with statistics"""
+    stats = get_dashboard_stats()
+    return render_template('admin_dashboard.html', stats=stats)
+
+
+@app.route('/admin/upload', methods=['GET', 'POST'])
+@admin_required
+def admin_upload():
+    """Upload candidates via CSV/Excel"""
+    if request.method == 'POST':
+        # Get selected job_id from form
+        job_id = request.form.get('job_id')
+
+        if not job_id or not is_valid_job_id(job_id):
+            return render_template('admin_upload.html',
+                                 error='Please select a valid job',
+                                 jobs=get_jobs())
+
+        # Links carry the job's link ID, which for a batch is its
+        # parent's ID rather than the batch's own.
+        selected_link_id = get_job_config(job_id)['link_id']
+
+        if 'file' not in request.files:
+            return render_template('admin_upload.html',
+                                 error='No file uploaded',
+                                 jobs=get_jobs())
+
+        file = request.files['file']
+
+        if file.filename == '':
+            return render_template('admin_upload.html',
+                                 error='No file selected',
+                                 jobs=get_jobs())
+
+        if file:
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+
+            try:
+                # Read file based on extension
+                if filename.endswith('.csv'):
+                    df = pd.read_csv(filepath)
+                elif filename.endswith(('.xlsx', '.xls')):
+                    df = pd.read_excel(filepath)
+                else:
+                    return render_template('admin_upload.html',
+                                         error='Invalid file format. Use CSV or Excel.',
+                                         jobs=get_jobs())
+
+                # Expected headers: Name, Email, Job Application Link.
+                # Matched case-insensitively with surrounding whitespace
+                # trimmed, so 'Name' / 'name' / ' NAME ' all work. Earlier
+                # spellings of the link column are still accepted.
+                header_map = {
+                    str(col).strip().lower(): col for col in df.columns
+                }
+                LINK_ALIASES = ('job application link', 'ai interview link',
+                                'interview_link', 'interview link')
+                PHONE_ALIASES = ('phone', 'phone number', 'mobile',
+                                 'mobile number', 'contact number',
+                                 'contact', 'phone_number', 'mobile_number')
+
+                name_col = header_map.get('name')
+                email_col = header_map.get('email')
+                link_col = next((header_map[a] for a in LINK_ALIASES
+                                 if a in header_map), None)
+                # Phone is optional: it is only needed for the reminder
+                # call, so a file without it still uploads fine.
+                phone_col = next((header_map[a] for a in PHONE_ALIASES
+                                  if a in header_map), None)
+
+                missing_columns = []
+                if not name_col:
+                    missing_columns.append('Name')
+                if not email_col:
+                    missing_columns.append('Email')
+                if not link_col:
+                    missing_columns.append('Job Application Link')
+
+                if missing_columns:
+                    return render_template(
+                        'admin_upload.html',
+                        error=(f"Missing required column(s): "
+                               f"{', '.join(missing_columns)}. "
+                               f"Expected: Name, Email, Job Application Link. "
+                               f"Found: {', '.join(str(c) for c in df.columns)}"),
+                        jobs=get_jobs())
+
+                # Add candidates with validation
+                success_count = 0
+                error_count = 0
+                errors = []
+                # Phone problems are warnings, not errors: the candidate
+                # is still created and can still book, they just will not
+                # get a reminder call.
+                phone_warnings = []
+                phone_ok_count = 0
+
+                for index, row in df.iterrows():
+                    row_num = index + 2  # Excel row number (header is row 1)
+
+                    # Get values
+                    name = row.get(name_col)
+                    email = row.get(email_col)
+                    interview_link = row.get(link_col)
+
+                    # Prepare row display for error messages
+                    row_display = (f"Name='{name}', Email='{email}', "
+                                   f"Job Application Link='{interview_link}'")
+
+                    # Validation 1: Check for missing fields
+                    if pd.isna(name) or pd.isna(email) or pd.isna(interview_link):
+                        error_count += 1
+                        missing_fields = []
+                        if pd.isna(name):
+                            missing_fields.append('Name')
+                        if pd.isna(email):
+                            missing_fields.append('Email')
+                        if pd.isna(interview_link):
+                            missing_fields.append('Job Application Link')
+                        errors.append(f"Row {row_num}: Missing required fields: {', '.join(missing_fields)} | Row data: {row_display}")
+                        continue
+
+                    # Validation 2: Validate interview_link and extract candidate_id and job_id
+                    extracted_candidate_id, extracted_job_id, link_error = extract_candidate_id_and_job_from_url(interview_link)
+                    if link_error:
+                        error_count += 1
+                        errors.append(f"Row {row_num}: {link_error} | Row data: {row_display}")
+                        continue
+
+                    # Validation 3: the link's ID must be the selected
+                    # job's link ID (for a batch, its parent's ID)
+                    if extracted_job_id != selected_link_id:
+                        error_count += 1
+                        errors.append(f"Row {row_num}: ID mismatch - link has '{extracted_job_id}' but the selected job's link ID is '{selected_link_id}' | Row data: {row_display}")
+                        continue
+
+                    # Validation 3b: one batch per candidate, so their
+                    # booking link resolves to exactly one batch
+                    other_batch = find_candidate_other_batch(
+                        extracted_candidate_id, selected_link_id, job_id)
+                    if other_batch:
+                        error_count += 1
+                        errors.append(f"Row {row_num}: candidate is already in batch '{other_batch}' of this job; a candidate can be in only one batch | Row data: {row_display}")
+                        continue
+
+                    # Validation 4: Validate UUID
+                    if not is_valid_uuid(extracted_candidate_id):
+                        error_count += 1
+                        errors.append(f"Row {row_num}: Invalid UUID format for candidate_id | Row data: {row_display}")
+                        continue
+
+                    # Validation 5: Validate name
+                    if not is_valid_name(name):
+                        error_count += 1
+                        if pd.isna(name) or str(name).strip() == '':
+                            errors.append(f"Row {row_num}: Name cannot be empty | Row data: {row_display}")
+                        else:
+                            errors.append(f"Row {row_num}: Name exceeds 100 character limit (current: {len(str(name))}) | Row data: {row_display}")
+                        continue
+
+                    # Validation 6: Validate email
+                    if not is_valid_email(email):
+                        error_count += 1
+                        errors.append(f"Row {row_num}: Invalid email format | Row data: {row_display}")
+                        continue
+
+                    # Validation 7: Normalise the phone number, if the
+                    # file has one. Failures do not reject the row.
+                    normalized_phone = None
+                    if phone_col is not None:
+                        raw_phone = row.get(phone_col)
+                        normalized_phone, phone_error = normalize_phone(raw_phone)
+                        if normalized_phone:
+                            phone_ok_count += 1
+                        elif not (pd.isna(raw_phone) if raw_phone is not None
+                                  else True):
+                            phone_warnings.append(
+                                f"Row {row_num}: {phone_error} "
+                                f"(candidate created; no reminder call)")
+
+                    # All validations passed, try to add candidate
+                    result = add_candidate(
+                        extracted_candidate_id,
+                        job_id,
+                        str(name).strip(),
+                        str(email).strip(),
+                        str(interview_link).strip(),
+                        phone=normalized_phone
+                    )
+
+                    if 'success' in result:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                        errors.append(f"Row {row_num}: {result.get('error')} | Row data: {row_display}")
+
+                # Clean up uploaded file
+                os.remove(filepath)
+
+                success_msg = (f'{success_count} candidates uploaded '
+                               f'successfully for {get_job_name(job_id)}.')
+                if phone_col is not None:
+                    success_msg += (f' {phone_ok_count} with a valid phone '
+                                    f'number for reminder calls.')
+                else:
+                    success_msg += (' No phone column found, so no reminder '
+                                    'calls can be placed for these candidates.')
+
+                return render_template('admin_upload.html',
+                                     success=success_msg,
+                                     error=f'{error_count} errors occurred.' if error_count > 0 else None,
+                                     errors=errors[:50],  # Show first 50 errors
+                                     warnings=phone_warnings[:50],
+                                     jobs=get_jobs())
+
+            except Exception as e:
+                return render_template('admin_upload.html',
+                                     error=f'Error processing file: {str(e)}',
+                                     jobs=get_jobs())
+
+    return render_template('admin_upload.html', jobs=get_jobs())
+
+
+@app.route('/admin/job-config', methods=['GET', 'POST'])
+@admin_required
+def admin_job_config():
+    """Configure job settings (time range, duration, capacity)"""
+    if request.method == 'POST':
+        job_id = request.form.get('job_id')
+        start_time = request.form.get('start_time')
+        end_time = request.form.get('end_time')
+        duration = request.form.get('duration')
+        capacity = request.form.get('capacity')
+
+        if not all([job_id, start_time, end_time, duration, capacity]):
+            return render_template('admin_job_config.html',
+                                 error='All fields are required',
+                                 jobs=get_jobs(),
+                                 configs=get_all_job_configs())
+
+        if not is_valid_job_id(job_id):
+            return render_template('admin_job_config.html',
+                                 error='Invalid job ID',
+                                 jobs=get_jobs(),
+                                 configs=get_all_job_configs())
+
+        try:
+            duration_int = int(duration)
+            capacity_int = int(capacity)
+
+            if duration_int <= 0 or capacity_int <= 0:
+                raise ValueError("Duration and capacity must be positive")
+
+            update_job_config(job_id, start_time, end_time, duration_int, capacity_int)
+
+            return render_template('admin_job_config.html',
+                                 success=f'Configuration updated for {get_job_name(job_id)}',
+                                 jobs=get_jobs(),
+                                 configs=get_all_job_configs())
+
+        except ValueError as e:
+            return render_template('admin_job_config.html',
+                                 error=f'Invalid input: {str(e)}',
+                                 jobs=get_jobs(),
+                                 configs=get_all_job_configs())
+
+    return render_template('admin_job_config.html',
+                         jobs=get_jobs(),
+                         configs=get_all_job_configs())
+
+
+@app.route('/admin/job-dates', methods=['GET', 'POST'])
+@admin_required
+def admin_job_dates():
+    """Manage interview dates for each job"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        job_id = request.form.get('job_id')
+
+        if not is_valid_job_id(job_id):
+            return render_template('admin_job_dates.html',
+                                 error='Invalid job ID',
+                                 jobs=get_jobs(),
+                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+        if action == 'add':
+            date_str = request.form.get('date')  # Format: yyyy-mm-dd from date input
+            start_time = request.form.get('start_time')  # Optional custom start time
+            end_time = request.form.get('end_time')  # Optional custom end time
+
+            if not date_str:
+                return render_template('admin_job_dates.html',
+                                     error='Date is required',
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+            try:
+                # Convert yyyy-mm-dd to dd-mm-yyyy and get day of week
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                formatted_date = date_obj.strftime('%d-%m-%Y')
+                day_of_week = date_obj.strftime('%A')
+
+                # Only pass start/end time if they are provided (not empty strings)
+                custom_start = start_time if start_time and start_time.strip() else None
+                custom_end = end_time if end_time and end_time.strip() else None
+
+                result = add_job_date(job_id, formatted_date, day_of_week, custom_start, custom_end)
+
+                if 'error' in result:
+                    return render_template('admin_job_dates.html',
+                                         error=result['error'],
+                                         jobs=get_jobs(),
+                                         all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+                time_info = ""
+                if custom_start and custom_end:
+                    time_info = f" (Custom times: {custom_start} - {custom_end})"
+
+                return render_template('admin_job_dates.html',
+                                     success=f'Date {formatted_date} ({day_of_week}){time_info} added to {get_job_name(job_id)}',
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+            except ValueError:
+                return render_template('admin_job_dates.html',
+                                     error='Invalid date format',
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+        elif action == 'update_times':
+            date = request.form.get('date')  # Format: dd-mm-yyyy
+            start_time = request.form.get('start_time')
+            end_time = request.form.get('end_time')
+
+            if not all([date, start_time, end_time]):
+                return render_template('admin_job_dates.html',
+                                     error='Date, start time, and end time are required',
+                                     jobs=get_jobs(),
+                                     all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+            update_job_date_times(job_id, date, start_time, end_time)
+
+            return render_template('admin_job_dates.html',
+                                 success=f'Time range updated for {date}: {start_time} - {end_time}',
+                                 jobs=get_jobs(),
+                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+        elif action == 'delete':
+            date = request.form.get('date')  # Format: dd-mm-yyyy
+
+            result = delete_job_date(job_id, date)
+            removed = result['bookings_removed']
+            note = (f' {removed} booking(s) on it were cancelled; those '
+                    f'candidates can book another date with their link.'
+                    if removed else '')
+
+            return render_template('admin_job_dates.html',
+                                 success=f'Date {date} removed from {get_job_name(job_id)}.{note}',
+                                 jobs=get_jobs(),
+                                 all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+    return render_template('admin_job_dates.html',
+                         jobs=get_jobs(),
+                         all_dates={jid: get_job_dates(jid) for jid in get_jobs().keys()})
+
+
+@app.route('/admin/init-slots', methods=['GET', 'POST'])
+@admin_required
+def admin_init_slots():
+    """Initialize slots for a specific job"""
+    if request.method == 'POST':
+        job_id = request.form.get('job_id')
+
+        if not is_valid_job_id(job_id):
+            return render_template('admin_init_slots.html',
+                                 error='Invalid job ID',
+                                 jobs=get_jobs(),
+                                 configs=get_all_job_configs())
+
+        result = initialize_slots_for_job(job_id)
+
+        if 'error' in result:
+            return render_template('admin_init_slots.html',
+                                 error=result['error'],
+                                 jobs=get_jobs(),
+                                 configs=get_all_job_configs())
+
+        return render_template('admin_init_slots.html',
+                             success=f"{result['slots_created']} slots initialized successfully for {get_job_name(job_id)}!",
+                             jobs=get_jobs(),
+                             configs=get_all_job_configs())
+
+    return render_template('admin_init_slots.html',
+                         jobs=get_jobs(),
+                         configs=get_all_job_configs())
+
+
+@app.route('/admin/clear-slots', methods=['POST'])
+@admin_required
+def admin_clear_slots():
+    """Clear all slots for a specific job (for testing/reset)"""
+    job_id = request.form.get('job_id')
+
+    if not is_valid_job_id(job_id):
+        return redirect(url_for('admin_init_slots'))
+
+    clear_slots_for_job(job_id)
+    return redirect(url_for('admin_init_slots'))
+
+
+@app.route('/admin/toggle-booking', methods=['POST'])
+@admin_required
+def admin_toggle_booking():
+    """Toggle booking enabled/disabled status (global)"""
+    action = request.form.get('action')  # 'enable' or 'disable'
+
+    if action == 'enable':
+        set_booking_enabled(True)
+    elif action == 'disable':
+        set_booking_enabled(False)
+
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/toggle-job-booking/<job_id>', methods=['POST'])
+@admin_required
+def admin_toggle_job_booking(job_id):
+    """Toggle booking enabled/disabled for a specific job"""
+    if not is_valid_job_id(job_id):
+        return redirect(url_for('admin_dashboard'))
+
+    action = request.form.get('action')  # 'enable' or 'disable'
+
+    if action == 'enable':
+        set_job_booking_enabled(job_id, True)
+    elif action == 'disable':
+        set_job_booking_enabled(job_id, False)
+
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/export')
+@admin_required
+def admin_export():
+    """Export all bookings to Excel or CSV"""
+    # Get export format from query parameter (default: xlsx)
+    export_format = request.args.get('format', 'xlsx').lower()
+    job_id = request.args.get('job_id')  # Optional job filter
+
+    # Filter by job if specified
+    bookings = get_all_bookings(job_id if job_id and is_valid_job_id(job_id) else None)
+
+    if not bookings:
+        return "No bookings to export", 400
+
+    # Prepare data for export
+    export_data = []
+    for booking in bookings:
+        # Get job config for duration
+        job_config = get_job_config(booking['job_id'])
+        slot_duration = job_config['slot_duration_minutes'] if job_config else 30
+
+        # Parse start time
+        start_datetime = datetime.strptime(
+            f"{booking['date']} {booking['start_time']}",
+            "%d-%m-%Y %H:%M"
+        )
+        end_datetime = start_datetime + timedelta(minutes=slot_duration)
+
+        # Get interview link and create expiry link
+        interview_link = booking.get('interview_link', '')
+        interview_link_with_expiry = add_expiry_to_interview_link(
+            interview_link,
+            start_datetime,
+            end_datetime
+        ) if interview_link else ''
+
+        export_data.append({
+            'Candidate ID': booking['candidate_id'],
+            'Name': booking['name'],
+            'Email': booking['email'],
+            'Job': booking['job_name'],
+            # The ID in candidates' links; the batch shows under 'Job'.
+            'Job ID': booking['link_id'],
+            'Date': booking['date'],
+            'Day': booking['day_of_week'],
+            'Start Time': start_datetime.strftime("%d-%m-%Y %H:%M"),
+            'End Time': end_datetime.strftime("%d-%m-%Y %H:%M"),
+            'Interview Link': interview_link,
+            'Interview Link with Expiry': interview_link_with_expiry,
+            'Booked At': booking['booked_at']
+        })
+
+    # Create DataFrame
+    df = pd.DataFrame(export_data)
+
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    job_suffix = f"_{job_id}" if job_id else "_all"
+    filename = f"bookings{job_suffix}_{timestamp}"
+
+    # Export based on format
+    if export_format == 'csv':
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], f'{filename}.csv')
+        df.to_csv(filepath, index=False)
+        return send_file(filepath, as_attachment=True, download_name=f'{filename}.csv')
+    else:  # xlsx
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], f'{filename}.xlsx')
+        df.to_excel(filepath, index=False, engine='openpyxl')
+        return send_file(filepath, as_attachment=True, download_name=f'{filename}.xlsx')
+
+
+@app.route('/admin/bookings')
+@admin_required
+def admin_bookings():
+    """View all bookings"""
+    job_id = request.args.get('job_id')  # Optional job filter
+    bookings = get_all_bookings(job_id if job_id and is_valid_job_id(job_id) else None)
+
+    # Reminder rows for every booking in one query, rather than one
+    # lookup per row.
+    reminders = get_notifications_for_bookings(channel='email')
+
+    for booking in bookings:
+        slot_duration = booking.get('slot_duration_minutes')
+        if slot_duration:
+            start_time = datetime.strptime(booking['start_time'], "%H:%M")
+            end_time = start_time + timedelta(minutes=slot_duration)
+            booking['end_time'] = end_time.strftime("%H:%M")
+
+        reminder = reminders.get(
+            (booking['candidate_id'], booking['job_id'], 'email'))
+        booking['reminder_status'] = reminder['status'] if reminder else None
+        booking['reminder_error'] = reminder['error'] if reminder else None
+        booking['reminder_sent_at'] = (reminder['updated_at']
+                                       if reminder else None)
+
+    return render_template('admin_bookings.html',
+                         bookings=bookings,
+                         jobs=get_jobs(),
+                         selected_job=job_id)
+
+
+@app.route('/admin/candidates')
+@admin_required
+def admin_candidates():
+    """View all candidates"""
+    job_id = request.args.get('job_id')  # Optional job filter
+    candidates = get_all_candidates(job_id if job_id and is_valid_job_id(job_id) else None)
+
+    # Result of a delete, passed through the redirect.
+    success = None
+    if request.args.get('deleted'):
+        success = f"Deleted {request.args.get('deleted')} candidate(s)"
+        if request.args.get('freed', '0') != '0':
+            success += (f" and freed {request.args.get('freed')} booked "
+                        f"slot(s)")
+        success += '.'
+
+    return render_template('admin_candidates.html',
+                         candidates=candidates,
+                         jobs=get_jobs(),
+                         selected_job=job_id,
+                         success=success,
+                         error=request.args.get('error'))
+
+
+@app.route('/admin/candidates/delete', methods=['POST'])
+@admin_required
+def admin_delete_candidates():
+    """Delete the selected candidates, freeing any slots they booked."""
+    return_job = request.form.get('return_job_id') or None
+    keys = []
+    for value in request.form.getlist('candidate'):
+        candidate_id, _, job_id = value.partition('|')
+        if candidate_id and is_valid_job_id(job_id):
+            keys.append((candidate_id, job_id))
+
+    if not keys:
+        return redirect(url_for('admin_candidates', job_id=return_job,
+                                error='Select at least one candidate'))
+
+    result = delete_candidates(keys)
+    print(f"[ADMIN] Deleted candidates {keys}: {result}")
+    return redirect(url_for('admin_candidates', job_id=return_job,
+                            deleted=result['deleted'],
+                            freed=result['bookings_freed']))
+
+
+@app.route('/admin/export-pending')
+@admin_required
+def admin_export_pending():
+    """Export pending and clicked candidates (non-booked) to CSV"""
+    job_id = request.args.get('job_id')
+    status_filter = request.args.get('status', 'all')  # 'pending', 'clicked', or 'all'
+
+    candidates = get_all_candidates(job_id if job_id and is_valid_job_id(job_id) else None)
+
+    # Filter for non-booked candidates (pending or clicked)
+    if status_filter == 'pending':
+        filtered = [c for c in candidates if c['status'] == 'pending']
+    elif status_filter == 'clicked':
+        filtered = [c for c in candidates if c['status'] == 'clicked']
+    else:
+        filtered = [c for c in candidates if c['status'] in ('pending', 'clicked')]
+
+    if not filtered:
+        return "No candidates to export", 400
+
+    # Prepare CSV data
+    export_data = []
+    for c in filtered:
+        export_data.append({
+            'Name': c['name'],
+            'Email': c['email'],
+            'Interview Link': c.get('interview_link', '')
+        })
+
+    df = pd.DataFrame(export_data)
+
+    # Generate CSV
+    output = io.StringIO()
+    df.to_csv(output, index=False)
+    output.seek(0)
+
+    # Create filename
+    job_suffix = f"_{job_id}" if job_id else "_all_jobs"
+    status_suffix = f"_{status_filter}" if status_filter != 'all' else "_pending_clicked"
+    filename = f"candidates{job_suffix}{status_suffix}.csv"
+
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
+
+
+@app.route('/admin/release-booking/<candidate_id>/<job_id>', methods=['POST'])
+@admin_required
+@csrf.exempt
+def admin_release_booking(candidate_id, job_id):
+    """Cancel a candidate's booking so they can book again.
+
+    Frees the slot for other candidates and lets this one re-use their
+    original booking link to pick a different time.
+    """
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID'}), 400
+
+    candidate = get_candidate(candidate_id, job_id)
+    if not candidate:
+        return jsonify({'error': 'Candidate not found'}), 404
+
+    result = release_booking(candidate_id, job_id)
+
+    if 'error' in result:
+        return jsonify(result), 400
+
+    print(f"[ADMIN] Released booking for candidate={candidate_id} "
+          f"job={job_id} ({result['freed_date']} {result['freed_time']})")
+
+    booking_link = booking_link_for(candidate_id,
+                                    get_job_config(job_id)['link_id'])
+    return jsonify({
+        'success': True,
+        'message': (f"Booking released. {result['freed_date']} "
+                    f"{result['freed_time']} is free again."),
+        'booking_link': booking_link,
+    })
+
+
+@app.route('/admin/calls')
+@admin_required
+def admin_calls():
+    """Every reminder call placed, and what became of it."""
+    job_id = request.args.get('job_id')
+    status = request.args.get('status')
+    outcome = request.args.get('outcome')
+
+    job_filter = job_id if job_id and is_valid_job_id(job_id) else None
+    status_filter = status if status in (
+        'queued', 'in_progress', 'completed', 'failed', 'cancelled') else None
+    outcome_filter = outcome if outcome in (
+        'answered', 'not_answered') else None
+
+    calls = get_call_logs(job_id=job_filter, status=status_filter,
+                          outcome=outcome_filter)
+
+    # The stored payload is what the agent was actually told, so it is
+    # shown per row rather than being re-derived.
+    for call in calls:
+        variables = {}
+        if call.get('request_payload'):
+            try:
+                payload = json.loads(call['request_payload'])
+                variables = payload.get('assistant_overrides', {}).get(
+                    'variable_values', {})
+            except (ValueError, TypeError):
+                variables = {}
+        call['variables'] = variables
+
+    return render_template('admin_calls.html',
+                           calls=calls,
+                           stats=get_call_stats(job_id=job_filter),
+                           jobs=get_jobs(),
+                           selected_job=job_filter,
+                           selected_status=status_filter,
+                           selected_outcome=outcome_filter)
+
+
+@app.route('/admin/call-recording/<execution_id>')
+@admin_required
+def admin_call_recording(execution_id):
+    """Redirect to the calling system's recording for one call.
+
+    The provider's URL expires, so it is never stored. This resolves it
+    at click time instead.
+    """
+    call = get_call_log(execution_id)
+    if not call:
+        return 'Call not found', 404
+    if not call.get('recording_available'):
+        return 'No recording available for this call', 404
+
+    return redirect(get_recording_url(
+        execution_id, job_config=get_job_call_config(call['job_id'])))
+
+
+@app.route('/admin/call-config', methods=['GET', 'POST'])
+@admin_required
+def admin_call_config():
+    """Call settings now live on the Communications page, per job."""
+    job_id = request.values.get('job_id')
+    return redirect(url_for('admin_communications', tab='call',
+                            **({'job_id': job_id} if job_id else {})))
+
+
+COMMUNICATION_TABS = ('branding', 'confirmation', 'reminder', 'followup',
+                      'call')
+
+# Seconds between follow-up emails. Keeps a large send under SES's
+# per-second rate limit.
+FOLLOWUP_SEND_INTERVAL_SECONDS = 0.1
+
+
+def booking_base_url():
+    """Public address of this deployment, e.g. https://schedule.fabrichq.ai.
+
+    Set per deployment with BOOKING_BASE_URL in .env, since each instance
+    is reached on its own domain. Without it, the address the admin
+    panel is being used on is assumed -- wrong if admins reach the app
+    through a different host (an IP, localhost) than candidates do.
+    """
+    base = (os.environ.get('BOOKING_BASE_URL') or '').strip()
+    if base and not base.startswith(('http://', 'https://')):
+        base = 'https://' + base
+    return (base or request.host_url).rstrip('/')
+
+
+def booking_link_for(candidate_id, link_id):
+    """The candidate's slot booking link, as the Fabric app builds it."""
+    return (f'{booking_base_url()}/book?candidate_id={candidate_id}'
+            f'&job_id={link_id}')
+
+
+@app.context_processor
+def _booking_link_helpers():
+    """Let templates build booking links the same way the code does."""
+    return {'booking_base_url': booking_base_url,
+            'booking_link_for': booking_link_for}
+
+
+def _form_value(field):
+    """A stripped form value, or None when blank (clears the setting)."""
+    value = (request.form.get(field) or '').strip()
+    return value or None
+
+
+def _positive_int(field, label):
+    """Parse an optional positive whole number. Returns (value, error)."""
+    raw = _form_value(field)
+    if raw is None:
+        return None, None
+    try:
+        value = int(raw)
+        if value <= 0:
+            raise ValueError
+        return value, None
+    except ValueError:
+        return None, f'{label} must be a positive whole number'
+
+
+def _invalid_addresses(raw):
+    """Entries in a comma-separated address list that are not emails."""
+    return [a.strip() for a in (raw or '').split(',')
+            if a.strip() and not is_valid_email(a.strip())]
+
+
+def _save_branding(job_id):
+    if not _form_value('company_name'):
+        return None, 'Company name is required'
+
+    for field, label in (('email_reply_to', 'Reply-to'),
+                         ('support_email', 'Support email'),
+                         ('email_cc', 'CC')):
+        bad = _invalid_addresses(request.form.get(field))
+        if bad:
+            return None, f'{label}: not a valid email address: {", ".join(bad)}'
+
+    faq_link = _form_value('faq_link')
+    if faq_link and not faq_link.startswith(('http://', 'https://')):
+        return None, 'FAQ link must start with http:// or https://'
+
+    cc = _form_value('email_cc')
+    if cc:
+        cc = ', '.join(a.strip() for a in cc.split(',') if a.strip())
+
+    update_job_communication(
+        job_id,
+        company_name=_form_value('company_name'),
+        email_reply_to=_form_value('email_reply_to'),
+        email_cc=cc,
+        support_email=_form_value('support_email'),
+        faq_link=faq_link,
+    )
+    return 'Branding saved', None
+
+
+def _save_template(job_id, kind):
+    subject = (request.form.get('subject') or '').strip()
+    body = request.form.get('body') or ''
+
+    if not subject or not body.strip():
+        return None, 'Subject and body are both required'
+
+    unknown = find_unknown_placeholders(subject + body, kind)
+    if unknown:
+        return None, (f'Unknown placeholder(s): {", ".join(unknown)}. '
+                      f'Use only the placeholders listed beside the editor.')
+
+    save_job_email_template(job_id, kind, subject, body)
+    label = {'confirmation': 'Confirmation', 'reminder': 'Reminder',
+             'followup': 'Follow-up'}[kind]
+    return f'{label} email saved', None
+
+
+def _save_reminder_settings(job_id):
+    lead, error = _positive_int('reminder_lead_minutes', 'Reminder lead time')
+    if error:
+        return None, error
+    enabled = request.form.get('reminder_email_enabled') == 'on'
+    update_job_communication(
+        job_id,
+        reminder_email_enabled=1 if enabled else 0,
+        reminder_lead_minutes=lead,
+    )
+    return (f'Reminder emails turned {"on" if enabled else "off"}'), None
+
+
+def _save_call(job_id):
+    calls_enabled = request.form.get('calls_enabled')
+    calls_on = (calls_enabled == 'on' or (
+        calls_enabled == 'inherit' and os.environ.get('CALLS_ENABLED', '')
+        .strip().lower() in ('1', 'true', 'yes', 'on')))
+    # The spoken company and role are only needed if calls will go out;
+    # switching calls off must not demand them.
+    if calls_on:
+        missing = [label for field, label in (('company_name', 'Company name'),
+                                              ('role_name', 'Role'))
+                   if not _form_value(field)]
+        if missing:
+            return None, (f'{" and ".join(missing)} (spoken) required when '
+                          f'calls are on')
+
+    lead, error = _positive_int('lead_minutes', 'Call lead time')
+    if error:
+        return None, error
+
+    # 'inherit' leaves the column NULL so the env value applies.
+    enabled_value = (None if calls_enabled == 'inherit'
+                     else (1 if calls_enabled == 'on' else 0))
+
+    update_job_call_config(
+        job_id,
+        calls_enabled=enabled_value,
+        assistant_id=_form_value('assistant_id'),
+        agent_type=_form_value('agent_type'),
+        agent_name=_form_value('agent_name'),
+        company_name=_form_value('company_name'),
+        role_name=_form_value('role_name'),
+        disqualification_rate=_form_value('disqualification_rate'),
+        lead_minutes=lead,
+        api_base_url=_form_value('api_base_url'),
+    )
+    return 'AI call settings saved', None
+
+
+def _send_followups(run_id, job_id, recipients):
+    """Email each recipient their booking link. Runs on a thread."""
+    import time
+    try:
+        for r in recipients:
+            # Re-check: someone may have booked since the send started.
+            current = get_candidate(r['candidate_id'], job_id)
+            if not current or current['status'] == 'booked':
+                record_followup_send(run_id, job_id, r['candidate_id'],
+                                     r['email'], 'skipped',
+                                     error='Booked before the email went out')
+                continue
+            try:
+                ok, err = send_booking_followup(
+                    candidate_name=r['name'], candidate_email=r['email'],
+                    job_name=r['job_name'], booking_link=r['booking_link'],
+                    job_id=job_id)
+            except Exception as exc:
+                ok, err = False, str(exc)
+            record_followup_send(run_id, job_id, r['candidate_id'],
+                                 r['email'], 'sent' if ok else 'failed',
+                                 error=err,
+                                 provider_ref=last_message_id() if ok else None)
+            time.sleep(FOLLOWUP_SEND_INTERVAL_SECONDS)
+    finally:
+        finish_followup_run(run_id)
+        print(f"[FOLLOWUP] Run {run_id} for job={job_id} finished")
+
+
+def _start_followup(job_id, audience):
+    """Queue follow-up emails to a job's candidates who have not booked."""
+    if audience not in FOLLOWUP_AUDIENCES:
+        return None, 'Choose who to send the follow-up to'
+    if not (get_job_communication(job_id) or {}).get('company_name'):
+        return None, ('Set the company name in the Branding tab before '
+                      'sending emails')
+
+    recipients = get_followup_recipients(job_id, audience)
+    if not recipients:
+        return None, 'No candidates match. Everyone in that group has booked.'
+    for r in recipients:
+        r['booking_link'] = booking_link_for(r['candidate_id'], r['link_id'])
+
+    run_id = create_followup_run(job_id, audience, len(recipients))
+    if run_id is None:
+        return None, ('A follow-up for this job is still sending. Wait for '
+                      'it to finish before sending another.')
+
+    threading.Thread(target=_send_followups,
+                     args=(run_id, job_id, recipients), daemon=True).start()
+    return (f'Sending the follow-up to {len(recipients)} candidate(s). '
+            f'Refresh to see progress below.'), None
+
+
+@app.route('/admin/communications', methods=['GET', 'POST'])
+@admin_required
+def admin_communications():
+    """Per-job branding, email templates and reminder settings.
+
+    Everything a candidate receives is configured here per job, so one
+    deployment can serve several clients at once.
+    """
+    jobs = get_jobs()
+    job_id = request.values.get('job_id')
+    if not job_id or job_id not in jobs:
+        job_id = next(iter(jobs), None)
+
+    tab = request.values.get('tab')
+    if tab not in COMMUNICATION_TABS:
+        tab = 'branding'
+
+    success = error = None
+    # Unsaved template edits, re-shown if the save is rejected.
+    submitted = {}
+
+    if request.method == 'POST' and job_id:
+        action = request.form.get('action')
+        kind = request.form.get('kind')
+
+        if action == 'save_branding':
+            success, error = _save_branding(job_id)
+        elif action == 'save_template' and kind in EMAIL_TEMPLATE_KINDS:
+            success, error = _save_template(job_id, kind)
+            if error:
+                submitted[kind] = {
+                    'subject': request.form.get('subject') or '',
+                    'body': request.form.get('body') or '',
+                    'is_custom': True,
+                }
+        elif action == 'reset_template' and kind in EMAIL_TEMPLATE_KINDS:
+            delete_job_email_template(job_id, kind)
+            success = 'Template reset to the default'
+        elif action == 'save_reminder_settings':
+            success, error = _save_reminder_settings(job_id)
+        elif action == 'save_call':
+            success, error = _save_call(job_id)
+        elif action == 'send_followup':
+            success, error = _start_followup(job_id,
+                                             request.form.get('audience'))
+        elif action == 'copy_from':
+            source = request.form.get('source_job_id')
+            if source == job_id or source not in jobs:
+                error = 'Choose a different job to copy from'
+            else:
+                result = copy_job_communication(source, job_id)
+                error = result.get('error')
+                if not error:
+                    success = (f'Copied all communication settings from '
+                               f'{jobs[source]}')
+        else:
+            error = 'Unknown action'
+
+    settings = get_job_communication(job_id) if job_id else None
+    templates = {kind: submitted.get(kind) or get_template(job_id, kind)
+                 for kind in EMAIL_TEMPLATE_KINDS} if job_id else {}
+
+    placeholders = {kind: placeholders_for(kind)
+                    for kind in EMAIL_TEMPLATE_KINDS}
+
+    # What a blank field falls back to, shown as each field's placeholder.
+    env_branding = get_job_branding(None)
+    defaults = {
+        'email_reply_to': env_branding['reply_to'],
+        'email_cc': ', '.join(env_branding['cc']),
+        'support_email': env_branding['support_email'],
+        'faq_link': env_branding['faq_link'],
+        'reminder_lead_minutes': os.environ.get('REMINDER_LEAD_MINUTES', '15'),
+        'call_lead_minutes': os.environ.get('CALL_LEAD_MINUTES', '30'),
+        'assistant_id': os.environ.get('CALLER_ASSISTANT_ID', ''),
+        'agent_type': os.environ.get('CALLER_AGENT_TYPE',
+                                     'integrity_reminder'),
+        'agent_name': os.environ.get('CALLER_AGENT_NAME', 'Riya'),
+        'disqualification_rate': os.environ.get(
+            'CALL_DISQUALIFICATION_RATE', 'eighty percent'),
+        'api_base_url': os.environ.get('CALLER_API_BASE_URL',
+                                       'http://localhost:8000'),
+        'calls_enabled': os.environ.get('CALLS_ENABLED', 'false'),
+    }
+
+    return render_template('admin_communications.html',
+                           jobs=jobs,
+                           job_id=job_id,
+                           job_name=jobs.get(job_id, ''),
+                           settings=settings or {},
+                           templates=templates,
+                           placeholders=placeholders,
+                           defaults=defaults,
+                           tab=tab,
+                           admin_email=ADMIN_USERNAME,
+                           followup_counts=(get_followup_audience_counts(job_id)
+                                            if job_id else {}),
+                           followup_runs=(get_followup_runs(job_id)
+                                          if job_id else []),
+                           sample_booking_link=(booking_link_for(
+                               'CANDIDATE_ID', settings['link_id'])
+                               if settings else ''),
+                           success=success,
+                           error=error)
+
+
+def _template_from_request(data):
+    """The subject/body an editor posted, for preview and test sends."""
+    return {'subject': (data.get('subject') or '').strip(),
+            'body': data.get('body') or ''}
+
+
+def _check_editor_request(data):
+    """Validate a preview/test request. Returns (template, error)."""
+    if (not is_valid_job_id(data.get('job_id'))
+            or data.get('kind') not in EMAIL_TEMPLATE_KINDS):
+        return None, 'Invalid job or template kind'
+    template = _template_from_request(data)
+    unknown = find_unknown_placeholders(
+        template['subject'] + template['body'], data['kind'])
+    if unknown:
+        return None, f'Unknown placeholder(s): {", ".join(unknown)}'
+    return template, None
+
+
+@app.route('/admin/communications/preview', methods=['POST'])
+@admin_required
+def admin_communications_preview():
+    """Render the editor's current, unsaved template with sample data."""
+    data = request.get_json(silent=True) or {}
+    template, error = _check_editor_request(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    subject, html_body, error = render_sample(
+        data['job_id'], get_job_title(data['job_id']), data['kind'], template)
+    if error:
+        return jsonify({'error': error}), 400
+    return jsonify({'subject': subject, 'html': html_body})
+
+
+@app.route('/admin/communications/test-email', methods=['POST'])
+@admin_required
+def admin_communications_test_email():
+    """Send the editor's current template, with sample data, to an admin."""
+    data = request.get_json(silent=True) or {}
+    template, error = _check_editor_request(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    to_address = (data.get('to') or '').strip()
+    if not is_valid_email(to_address):
+        return jsonify({'error': 'Enter a valid email address'}), 400
+
+    ok, error = send_test_email(data['job_id'], get_job_title(data['job_id']),
+                                data['kind'], to_address, template)
+    if not ok:
+        return jsonify({'error': error or 'Send failed'}), 502
+    return jsonify({'success': True,
+                    'message': f'Test email sent to {to_address}'})
+
+
+@app.route('/admin/notifications')
+@admin_required
+def admin_notifications():
+    """Log of every reminder the worker has attempted."""
+    job_id = request.args.get('job_id')
+    status = request.args.get('status')
+    channel = request.args.get('channel')
+
+    job_filter = job_id if job_id and is_valid_job_id(job_id) else None
+    status_filter = status if status in (
+        'sent', 'failed', 'skipped', 'pending') else None
+    channel_filter = channel if channel in ('email', 'call') else None
+
+    notifications = get_notification_log(
+        job_id=job_filter, status=status_filter, channel=channel_filter)
+    stats = get_notification_stats(job_id=job_filter)
+
+    return render_template('admin_notifications.html',
+                           notifications=notifications,
+                           stats=stats,
+                           jobs=get_jobs(),
+                           selected_job=job_filter,
+                           selected_status=status_filter,
+                           selected_channel=channel_filter)
+
+
+@app.route('/admin/retry-reminder/<candidate_id>/<job_id>', methods=['POST'])
+@admin_required
+@csrf.exempt
+def admin_retry_reminder(candidate_id, job_id):
+    """Clear a reminder record so the worker can send it again.
+
+    Does not send anything itself: it deletes the claim, and the next
+    worker pass picks the booking up -- but only if the slot is still
+    inside the reminder window, so a retry after the slot has passed
+    correctly does nothing.
+    """
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID'}), 400
+
+    # Retry one channel at a time, so clearing a failed call does not
+    # also re-send an email the candidate already received.
+    channel = request.args.get('channel')
+    if channel not in ('email', 'call'):
+        channel = 'email'
+
+    removed = release_notification(candidate_id, job_id, channel=channel)
+    if not removed:
+        return jsonify({'error': f'No {channel} record found'}), 404
+
+    print(f"[ADMIN] Cleared {channel} reminder for candidate={candidate_id} "
+          f"job={job_id}; worker will retry if still in window")
+    noun = 'Call' if channel == 'call' else 'Reminder'
+    return jsonify({
+        'success': True,
+        'message': (f'{noun} cleared. It will be retried on the next '
+                    f'worker pass, if the slot is still within the '
+                    f'reminder window.'),
+    })
+
+
+@app.route('/admin/resend-email/<candidate_id>/<job_id>', methods=['POST'])
+@admin_required
+@csrf.exempt
+def admin_resend_email(candidate_id, job_id):
+    """Resend booking confirmation email for a specific candidate."""
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID'}), 400
+
+    booking = get_booking_with_details(candidate_id, job_id)
+    if not booking:
+        return jsonify({'error': 'Booking not found'}), 404
+
+    job_config = get_job_config(job_id)
+    slot_duration = job_config['slot_duration_minutes'] if job_config else 30
+
+    print(f"[EMAIL] Admin triggered resend for candidate={candidate_id} job={job_id}")
+    email_thread = threading.Thread(
+        target=send_confirmation_email_async,
+        args=(candidate_id, job_id, booking['date'], booking['start_time'], slot_duration, 0),  # delay=0 for manual resend
+        daemon=True
+    )
+    email_thread.start()
+
+    return jsonify({'success': True, 'message': 'Email queued for sending'})
+
+
+@app.route('/admin/slots')
+@admin_required
+def admin_slots():
+    """View all slots with booking statistics for a specific job"""
+    job_id = request.args.get('job_id')  # Required job filter
+
+    if not job_id or not is_valid_job_id(job_id):
+        # If no valid job selected, redirect to dashboard
+        return redirect(url_for('admin_dashboard'))
+
+    # Get all slots for the selected job
+    all_slots = get_all_slots_for_job(job_id)
+
+    # Group slots by date for better display
+    slots_by_date = {}
+    for slot in all_slots:
+        date = slot['date']
+        if date not in slots_by_date:
+            slots_by_date[date] = {
+                'date': date,
+                'day_of_week': slot['day_of_week'],
+                'slots': [],
+                'total_capacity': 0,
+                'total_held': 0,
+                'total_booked': 0
+            }
+        slots_by_date[date]['slots'].append(slot)
+        slots_by_date[date]['total_capacity'] += slot['max_capacity']
+        slots_by_date[date]['total_booked'] += slot['booked_count']
+        slots_by_date[date]['total_held'] += slot['held_seats']
+
+    # Convert to sorted list
+    dates_data = sorted(slots_by_date.values(), key=lambda x: x['date'])
+
+    return render_template('admin_slots.html',
+                         dates_data=dates_data,
+                         jobs=get_jobs(),
+                         selected_job=job_id,
+                         job_name=get_job_name(job_id),
+                         success=request.args.get('msg'),
+                         error=request.args.get('error'))
+
+
+@app.route('/admin/slots/block', methods=['POST'])
+@admin_required
+def admin_block_slots():
+    """Block or unblock a slot, or every slot on a date."""
+    job_id = request.form.get('job_id')
+    if not is_valid_job_id(job_id):
+        return redirect(url_for('admin_dashboard'))
+    blocked = request.form.get('action') == 'block'
+    slot_id = request.form.get('slot_id', type=int)
+    date = request.form.get('date') or None
+    if slot_id is None and not date:
+        return redirect(url_for('admin_slots', job_id=job_id))
+    changed = set_slots_blocked(job_id, blocked, slot_id=slot_id,
+                                date=None if slot_id is not None else date)
+    return redirect(url_for('admin_slots', job_id=job_id,
+                            msg=f'{"Blocked" if blocked else "Unblocked"} '
+                                f'{changed} slot(s)'))
+
+
+@app.route('/admin/slots/hold', methods=['POST'])
+@admin_required
+def admin_hold_seats():
+    """Hold back some seats in a slot, or in every slot on a date."""
+    job_id = request.form.get('job_id')
+    if not is_valid_job_id(job_id):
+        return redirect(url_for('admin_dashboard'))
+    seats = request.form.get('seats', type=int)
+    slot_id = request.form.get('slot_id', type=int)
+    date = request.form.get('date') or None
+    if seats is None or seats < 0 or (slot_id is None and not date):
+        return redirect(url_for('admin_slots', job_id=job_id,
+                                error='Enter a number of seats (0 or more)'))
+
+    result = set_held_seats(job_id, seats, slot_id=slot_id,
+                            date=None if slot_id is not None else date)
+    where = 'the slot' if slot_id is not None else f'{result["changed"]} slot(s) on {date}'
+    msg = (f'Released held seats in {where}' if seats == 0
+           else f'Holding {seats} seat(s) in {where}')
+    if result['capped']:
+        msg += (f'. {result["capped"]} slot(s) had fewer free seats, so '
+                f'they hold only what was free')
+    return redirect(url_for('admin_slots', job_id=job_id, msg=msg + '.'))
+
+
+@app.route('/admin/jobs', methods=['GET', 'POST'])
+@admin_required
+def admin_jobs():
+    """Manage jobs - create new jobs and batches of existing ones"""
+    def render(**kwargs):
+        return render_template('admin_jobs.html', jobs=get_jobs(),
+                               configs=get_all_job_configs(),
+                               usage=get_job_usage(), **kwargs)
+
+    if request.method == 'POST' and request.form.get('action') == 'delete_job':
+        job_id = request.form.get('job_id')
+        if not is_valid_job_id(job_id):
+            return render(error='Job not found')
+        job_name = get_job_name(job_id)
+        usage = get_job_usage()[job_id]
+        # Booked candidates lose their slot, so that needs its own
+        # explicit acknowledgement, not just the generic confirm.
+        if usage['bookings'] and request.form.get('confirm_bookings') != 'yes':
+            return render(error=(f'"{job_name}" has {usage["bookings"]} '
+                                 f'booked candidate(s). Tick the '
+                                 f'confirmation box to delete it.'))
+        result = delete_job(job_id)
+        if 'error' in result:
+            return render(error=result['error'])
+        c = result['counts']
+        print(f"[ADMIN] Deleted job {job_id} ({job_name}): {c}")
+        return render(success=(f'Deleted "{job_name}" with {c["candidates"]} '
+                               f'candidate(s), {c["bookings"]} booking(s) '
+                               f'and {c["slots"]} slot(s).'))
+
+    if request.method == 'POST' and request.form.get('action') == 'rename_job':
+        job_id = request.form.get('job_id')
+        new_name = (request.form.get('job_name') or '').strip()
+        new_batch = (request.form.get('batch_name') or '').strip() or None
+        if not is_valid_job_id(job_id):
+            return render(error='Job not found')
+        if not new_name:
+            return render(error='Job name is required')
+        job = get_job_config(job_id)
+        if job['parent_job_id'] and not new_batch:
+            return render(error='A batch needs a batch label')
+        label = f'{new_name} – {new_batch}' if new_batch else new_name
+        if any(label == name for jid, name in get_jobs().items()
+               if jid != job_id):
+            return render(error=f'Another job is already called "{label}"')
+        rename_job(job_id, new_name, new_batch)
+        return render(success=f'Renamed to "{label}".')
+
+    if request.method == 'POST' and request.form.get('action') == 'add_batch':
+        parent_id = request.form.get('parent_job_id')
+        batch_name = (request.form.get('batch_name') or '').strip()
+        if not is_valid_job_id(parent_id):
+            return render(error='Choose a valid job to add a batch to')
+        if not batch_name:
+            return render(error='Batch name is required')
+        label = f'{get_job_title(parent_id)} – {batch_name}'
+        if label in get_jobs().values():
+            return render(error=f'This job already has a batch called "{batch_name}"')
+
+        result = create_batch(parent_id, batch_name)
+        if 'error' in result:
+            return render(error=result['error'])
+        return render(success=(f'Batch "{batch_name}" created. Add its '
+                               f'interview dates, initialize its slots, then '
+                               f'upload its candidates.'))
+
+    if request.method == 'POST':
+        job_id = request.form.get('job_id')
+        job_name = request.form.get('job_name')
+        company_name = (request.form.get('company_name') or '').strip()
+        start_time = request.form.get('start_time', '08:00')
+        end_time = request.form.get('end_time', '00:00')
+        duration = request.form.get('duration', '60')
+        capacity = request.form.get('capacity', '15')
+
+        if not all([job_id, job_name, company_name]):
+            return render(error='Job ID, Job Name and Company Name are required')
+
+        # Validate UUID format
+        try:
+            from uuid import UUID
+            UUID(str(job_id).strip(), version=4)
+        except (ValueError, AttributeError):
+            return render(error='Job ID must be a valid UUID (e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6)')
+
+        try:
+            duration_int = int(duration)
+            capacity_int = int(capacity)
+
+            if duration_int <= 0 or capacity_int <= 0:
+                raise ValueError("Duration and capacity must be positive")
+
+            result = create_job(job_id.strip(), job_name.strip(), start_time, end_time, duration_int, capacity_int,
+                                company_name=company_name)
+
+            if 'error' in result:
+                return render(error=result['error'])
+
+            return render(success=f'Job "{job_name}" created successfully!')
+
+        except ValueError as e:
+            return render(error=f'Invalid input: {str(e)}')
+
+    return render()
+
+
+# Error handlers
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('404.html'), 404
+
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return render_template('500.html'), 500
+
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5001)
