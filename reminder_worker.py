@@ -44,7 +44,9 @@ from database import (
     init_database, create_call_log, get_pollable_call_logs,
     update_call_log, bump_call_poll_attempt, get_all_job_communications,
 )
-from job_call_settings import get_job_call_config, get_all_job_call_configs
+from job_call_settings import (
+    get_job_call_config, get_all_job_call_configs, missing_required,
+)
 from email_utils import send_slot_reminder, last_message_id
 from caller_utils import build_call_payload, place_call, get_call_details
 
@@ -255,6 +257,17 @@ def call_one(booking, now, dry_run=False):
                               scheduled_for=now):
         logger.debug('Call already claimed: %s / %s', candidate_id, job_id)
         return 'claimed-by-other'
+
+    # The agent must not guess who it is calling for; a job switched on
+    # without its spoken company and role is skipped, visibly.
+    missing = missing_required(job_config)
+    if missing:
+        logger.warning('Call settings for job %s lack %s; skipping call '
+                       'to %s', job_id, ', '.join(missing), booking['name'])
+        mark_notification(candidate_id, job_id, CALL_CHANNEL, KIND, 'skipped',
+                          error=(f'AI call {" and ".join(missing)} not set '
+                                 f'for this job'))
+        return 'skipped'
 
     # No number is the normal case for anyone whose phone did not
     # normalise on upload, so it is recorded and skipped rather than

@@ -3,22 +3,35 @@
 {% block page_title %}Candidates{% endblock %}
 {% block page_subtitle %}Everyone uploaded for a job, their booking status and personal booking link.{% endblock %}
 {% block page_actions %}
-<form method="GET" action="/admin/candidates" class="d-flex">
-    <select name="job_id" class="form-select" onchange="this.form.submit()" aria-label="Filter by job">
-        <option value="">All Jobs</option>
-        {% for jid, jname in jobs.items() %}
-        <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
-        {% endfor %}
-    </select>
-</form>
 <a href="/admin/upload" class="btn btn-primary text-nowrap">
     <i class="bi bi-upload"></i> Upload Candidates
 </a>
 {% endblock %}
 
 {% block admin_content %}
-<!-- Status Filter -->
+{% include "_admin_alerts.html" %}
+
+<form method="POST" action="{{ url_for('admin_delete_candidates') }}" id="delete-candidates-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_job_id" value="{{ selected_job or '' }}">
+</form>
+
+<!-- Filters -->
 <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+    <form method="GET" action="{{ url_for('admin_candidates') }}" class="input-group job-filter" role="search">
+        <label class="input-group-text" for="job-filter"><i class="bi bi-briefcase me-1"></i> Job position</label>
+        <select name="job_id" id="job-filter" class="form-select" onchange="this.form.submit()">
+            <option value="">All jobs</option>
+            {% for jid, jname in jobs.items() %}
+            <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
+            {% endfor %}
+        </select>
+        {% if selected_job %}
+        <a href="{{ url_for('admin_candidates') }}" class="btn btn-outline-secondary" title="Clear job filter" aria-label="Clear job filter"><i class="bi bi-x-lg"></i></a>
+        {% endif %}
+        <noscript><button class="btn btn-primary">Apply</button></noscript>
+    </form>
     <div class="segmented" role="group" aria-label="Filter by status">
         <button type="button" class="btn filter-btn active" data-status="all">
             All <span class="count">{{ candidates|length }}</span>
@@ -33,6 +46,12 @@
             <span class="legend-dot dot-booked"></span>Booked <span class="count">{{ candidates|selectattr('status', 'equalto', 'booked')|list|length }}</span>
         </button>
     </div>
+    </div>
+    {% if candidates %}
+    <button type="button" class="btn btn-outline-danger" id="delete-selected-btn" disabled>
+        <i class="bi bi-trash"></i> Delete selected <span class="badge text-bg-danger ms-1" id="selected-count">0</span>
+    </button>
+    {% endif %}
 </div>
 
 <div class="card table-card">
@@ -41,12 +60,16 @@
         <table class="table table-hover table-modern" id="candidatesTable">
             <thead>
                 <tr>
+                    <th class="text-center" style="width: 2.5rem;">
+                        <input class="form-check-input" type="checkbox" id="select-all" aria-label="Select all visible candidates">
+                    </th>
                     <th>#</th>
                     <th>Name</th>
                     <th>Email</th>
                     <th>Phone</th>
                     <th>Job Position</th>
                     <th>Status</th>
+                    <th><span class="visually-hidden">Delete</span></th>
                     <th>Candidate ID</th>
                     <th>AI Discussion Link</th>
                     <th>Slot Booking Link</th>
@@ -56,6 +79,13 @@
             <tbody>
                 {% for candidate in candidates %}
                 <tr data-status="{{ candidate.status }}">
+                    <td class="text-center">
+                        <input class="form-check-input candidate-check" type="checkbox" name="candidate"
+                               form="delete-candidates-form"
+                               value="{{ candidate.candidate_id }}|{{ candidate.job_id }}"
+                               data-name="{{ candidate.name }}" data-booked="{{ 1 if candidate.status == 'booked' else 0 }}"
+                               aria-label="Select {{ candidate.name }}">
+                    </td>
                     <td class="text-muted">{{ loop.index }}</td>
                     <td class="cell-strong">{{ candidate.name }}</td>
                     <td>{{ candidate.email }}</td>
@@ -75,6 +105,12 @@
                         {% else %}
                             <span class="status-pill pill-neutral">{{ candidate.status }}</span>
                         {% endif %}
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-danger delete-one-btn"
+                                title="Delete {{ candidate.name }}" aria-label="Delete {{ candidate.name }}">
+                            <i class="bi bi-trash"></i>
+                        </button>
                     </td>
                     <td>
                         <span class="id-mono" title="{{ candidate.candidate_id }}">{{ candidate.candidate_id[:8] }}...</span>
@@ -122,6 +158,38 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Delete candidates confirmation -->
+<div class="modal fade" id="deleteCandidatesModal" tabindex="-1" aria-labelledby="deleteCandidatesLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="deleteCandidatesLabel">Delete <span id="del-count"></span> candidate(s)?</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2" id="del-names"></p>
+                <div class="callout callout-danger d-none" id="del-booked-warning">
+                    <i class="bi bi-exclamation-octagon"></i>
+                    <div><strong><span id="del-booked"></span> of them already booked a slot.</strong>
+                        Their bookings will be deleted and the seats freed for others. They will not be notified.</div>
+                </div>
+                <p class="text-danger small mb-0 mt-3">This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" form="delete-candidates-form" class="btn btn-danger"><i class="bi bi-trash"></i> Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .job-filter { width: auto; min-width: 18rem; max-width: 100%; flex-wrap: nowrap; }
+    .job-filter .form-select { min-width: 10rem; }
+</style>
 {% endblock %}
 
 {% block extra_js %}
@@ -155,6 +223,58 @@ document.addEventListener('DOMContentLoaded', function() {
             if (totalCount) {
                 totalCount.textContent = visibleCount;
             }
+        });
+    });
+
+    // Selection and deletion
+    const checks = Array.from(document.querySelectorAll('.candidate-check'));
+    const selectAll = document.getElementById('select-all');
+    const deleteSelected = document.getElementById('delete-selected-btn');
+    const selectedCount = document.getElementById('selected-count');
+    const modalEl = document.getElementById('deleteCandidatesModal');
+    const modal = modalEl ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+    const isVisible = cb => cb.closest('tr').style.display !== 'none';
+
+    function refreshSelection() {
+        const n = checks.filter(cb => cb.checked).length;
+        if (selectedCount) selectedCount.textContent = n;
+        if (deleteSelected) deleteSelected.disabled = n === 0;
+        if (selectAll) {
+            const visible = checks.filter(isVisible);
+            selectAll.checked = visible.length > 0 && visible.every(cb => cb.checked);
+        }
+    }
+    checks.forEach(cb => cb.addEventListener('change', refreshSelection));
+    if (selectAll) selectAll.addEventListener('change', function () {
+        checks.forEach(cb => { cb.checked = this.checked && isVisible(cb); });
+        refreshSelection();
+    });
+    // A status filter hides rows; untick hidden ones so a delete only
+    // ever covers what is on screen.
+    filterBtns.forEach(btn => btn.addEventListener('click', function () {
+        checks.forEach(cb => { if (!isVisible(cb)) cb.checked = false; });
+        refreshSelection();
+    }));
+
+    function openConfirm() {
+        const selected = checks.filter(cb => cb.checked);
+        if (!selected.length || !modal) return;
+        const booked = selected.filter(cb => cb.dataset.booked === '1').length;
+        const names = selected.map(cb => cb.dataset.name);
+        document.getElementById('del-count').textContent = selected.length;
+        document.getElementById('del-names').textContent = names.slice(0, 8).join(', ') +
+            (names.length > 8 ? ' and ' + (names.length - 8) + ' more' : '');
+        document.getElementById('del-booked').textContent = booked;
+        document.getElementById('del-booked-warning').classList.toggle('d-none', booked === 0);
+        modal.show();
+    }
+    if (deleteSelected) deleteSelected.addEventListener('click', openConfirm);
+    document.querySelectorAll('.delete-one-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            checks.forEach(cb => { cb.checked = false; });
+            this.closest('tr').querySelector('.candidate-check').checked = true;
+            refreshSelection();
+            openConfirm();
         });
     });
 

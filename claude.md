@@ -73,10 +73,11 @@ https://slot-booking.fabrichq.ai/book?candidate_id=<CANDIDATE_UUID>&job_id=<JOB_
 
 ### 8. Per-Job Communications (multi-client)
 - Everything a candidate receives is configured per job at **Admin > Communications** (`/admin/communications?job_id=&tab=branding|confirmation|reminder|call`), so one deployment serves several clients at once.
-- **Branding** (columns on `job_configs`): `company_name` (sender "Team <company>"), `email_reply_to`, `email_cc` (confirmation only), `support_email`, `faq_link`. Also shown on candidate pages.
-- **Email templates** (`job_email_templates`, one row per `job_id` + `kind` = `confirmation|reminder`): subject + HTML body with `{{Placeholder}}` tokens (list in `email_utils.PLACEHOLDERS`). Unknown placeholders are rejected on save. No row = built-in default (`email_templates/default_slot_*.html`).
+- **Branding** (columns on `job_configs`): `company_name` (sender "Team <company>"; **required**, set at job creation, no .env fallback, and a job without one cannot send email), `email_reply_to`, `email_cc` (confirmation only), `support_email`, `faq_link`. Also shown on candidate pages. Defaulted fields are pre-filled with the .env values in the form.
+- **Email templates** (`job_email_templates`, one row per `job_id` + `kind` = `confirmation|reminder|followup`): subject + HTML body with `{{Placeholder}}` tokens (list in `email_utils.PLACEHOLDERS`). Unknown placeholders are rejected on save. No row = built-in default (`email_templates/default_slot_*.html`).
 - **Reminder email**: `reminder_email_enabled`, `reminder_lead_minutes` per job.
-- **AI call**: `call_enabled` (NULL follows `CALLS_ENABLED`), `call_lead_minutes`, `call_*` persona fields, read through `job_call_settings.py`.
+- **AI call**: `call_enabled` (NULL follows `CALLS_ENABLED`), `call_lead_minutes`, `call_*` persona fields, read through `job_call_settings.py`. Spoken `call_company_name` and `call_role_name` are required, and the worker skips calls for a job without them. Assistant ID, agent type and API URL default from .env.
+- **Follow-up email** (Communications > Follow-up email): emails candidates who have not booked (all / never opened / opened but not booked) their booking link (`{{Booking Link}}`, built from `BOOKING_BASE_URL` + the job's `link_id`). Sends on a background thread; each click is a `followup_runs` row with one `followup_sends` row per candidate. A second send for the same job is refused while one is running.
 - Blank fields fall back to `.env` values. Templates and settings are read at send time, so edits apply without restarting the app or `reminder_worker.py`.
 - "Copy from another job" clones all of the above between jobs.
 

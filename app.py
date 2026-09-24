@@ -40,6 +40,10 @@ from database import (
     copy_job_communication, EMAIL_TEMPLATE_KINDS,
     create_batch, link_id_exists, find_candidate_by_link,
     find_candidate_other_batch,
+    get_followup_recipients, get_followup_audience_counts,
+    create_followup_run, record_followup_send, finish_followup_run,
+    get_followup_runs, FOLLOWUP_AUDIENCES,
+    get_job_usage, delete_job, delete_candidates,
 )
 from job_call_settings import update_job_call_config, get_job_call_config
 from caller_utils import get_recording_url
@@ -50,7 +54,7 @@ from config import (
 from email_utils import (
     send_booking_confirmation, get_template, get_job_branding,
     find_unknown_placeholders, render_sample, send_test_email,
-    PLACEHOLDERS, KIND_ONLY_PLACEHOLDERS,
+    placeholders_for, send_booking_followup, last_message_id,
 )
 from phone_utils import normalize_phone
 
@@ -1090,10 +1094,43 @@ def admin_candidates():
     job_id = request.args.get('job_id')  # Optional job filter
     candidates = get_all_candidates(job_id if job_id and is_valid_job_id(job_id) else None)
 
+    # Result of a delete, passed through the redirect.
+    success = None
+    if request.args.get('deleted'):
+        success = f"Deleted {request.args.get('deleted')} candidate(s)"
+        if request.args.get('freed', '0') != '0':
+            success += (f" and freed {request.args.get('freed')} booked "
+                        f"slot(s)")
+        success += '.'
+
     return render_template('admin_candidates.html',
                          candidates=candidates,
                          jobs=get_jobs(),
-                         selected_job=job_id)
+                         selected_job=job_id,
+                         success=success,
+                         error=request.args.get('error'))
+
+
+@app.route('/admin/candidates/delete', methods=['POST'])
+@admin_required
+def admin_delete_candidates():
+    """Delete the selected candidates, freeing any slots they booked."""
+    return_job = request.form.get('return_job_id') or None
+    keys = []
+    for value in request.form.getlist('candidate'):
+        candidate_id, _, job_id = value.partition('|')
+        if candidate_id and is_valid_job_id(job_id):
+            keys.append((candidate_id, job_id))
+
+    if not keys:
+        return redirect(url_for('admin_candidates', job_id=return_job,
+                                error='Select at least one candidate'))
+
+    result = delete_candidates(keys)
+    print(f"[ADMIN] Deleted candidates {keys}: {result}")
+    return redirect(url_for('admin_candidates', job_id=return_job,
+                            deleted=result['deleted'],
+                            freed=result['bookings_freed']))
 
 
 @app.route('/admin/export-pending')
@@ -1245,7 +1282,23 @@ def admin_call_config():
                             **({'job_id': job_id} if job_id else {})))
 
 
-COMMUNICATION_TABS = ('branding', 'confirmation', 'reminder', 'call')
+COMMUNICATION_TABS = ('branding', 'confirmation', 'reminder', 'followup',
+                      'call')
+
+# Seconds between follow-up emails. Keeps a large send under SES's
+# per-second rate limit.
+FOLLOWUP_SEND_INTERVAL_SECONDS = 0.1
+
+
+def booking_link_for(candidate_id, link_id):
+    """The candidate's slot booking link.
+
+    BOOKING_BASE_URL in .env sets the public domain; without it the
+    address the admin is using is assumed, which is right unless the
+    admin panel is reached through a different host than candidates.
+    """
+    base = (os.environ.get('BOOKING_BASE_URL') or request.host_url).rstrip('/')
+    return f'{base}/book?candidate_id={candidate_id}&job_id={link_id}'
 
 
 def _form_value(field):
@@ -1275,6 +1328,9 @@ def _invalid_addresses(raw):
 
 
 def _save_branding(job_id):
+    if not _form_value('company_name'):
+        return None, 'Company name is required'
+
     for field, label in (('email_reply_to', 'Reply-to'),
                          ('support_email', 'Support email'),
                          ('email_cc', 'CC')):
@@ -1332,6 +1388,12 @@ def _save_reminder_settings(job_id):
 
 
 def _save_call(job_id):
+    missing = [label for field, label in (('company_name', 'Company name'),
+                                          ('role_name', 'Role'))
+               if not _form_value(field)]
+    if missing:
+        return None, f'{" and ".join(missing)} (spoken) required'
+
     lead, error = _positive_int('lead_minutes', 'Call lead time')
     if error:
         return None, error
@@ -1354,6 +1416,60 @@ def _save_call(job_id):
         api_base_url=_form_value('api_base_url'),
     )
     return 'AI call settings saved', None
+
+
+def _send_followups(run_id, job_id, recipients):
+    """Email each recipient their booking link. Runs on a thread."""
+    import time
+    try:
+        for r in recipients:
+            # Re-check: someone may have booked since the send started.
+            current = get_candidate(r['candidate_id'], job_id)
+            if not current or current['status'] == 'booked':
+                record_followup_send(run_id, job_id, r['candidate_id'],
+                                     r['email'], 'skipped',
+                                     error='Booked before the email went out')
+                continue
+            try:
+                ok, err = send_booking_followup(
+                    candidate_name=r['name'], candidate_email=r['email'],
+                    job_name=r['job_name'], booking_link=r['booking_link'],
+                    job_id=job_id)
+            except Exception as exc:
+                ok, err = False, str(exc)
+            record_followup_send(run_id, job_id, r['candidate_id'],
+                                 r['email'], 'sent' if ok else 'failed',
+                                 error=err,
+                                 provider_ref=last_message_id() if ok else None)
+            time.sleep(FOLLOWUP_SEND_INTERVAL_SECONDS)
+    finally:
+        finish_followup_run(run_id)
+        print(f"[FOLLOWUP] Run {run_id} for job={job_id} finished")
+
+
+def _start_followup(job_id, audience):
+    """Queue follow-up emails to a job's candidates who have not booked."""
+    if audience not in FOLLOWUP_AUDIENCES:
+        return None, 'Choose who to send the follow-up to'
+    if not (get_job_communication(job_id) or {}).get('company_name'):
+        return None, ('Set the company name in the Branding tab before '
+                      'sending emails')
+
+    recipients = get_followup_recipients(job_id, audience)
+    if not recipients:
+        return None, 'No candidates match. Everyone in that group has booked.'
+    for r in recipients:
+        r['booking_link'] = booking_link_for(r['candidate_id'], r['link_id'])
+
+    run_id = create_followup_run(job_id, audience, len(recipients))
+    if run_id is None:
+        return None, ('A follow-up for this job is still sending. Wait for '
+                      'it to finish before sending another.')
+
+    threading.Thread(target=_send_followups,
+                     args=(run_id, job_id, recipients), daemon=True).start()
+    return (f'Sending the follow-up to {len(recipients)} candidate(s). '
+            f'Refresh to see progress below.'), None
 
 
 @app.route('/admin/communications', methods=['GET', 'POST'])
@@ -1398,6 +1514,9 @@ def admin_communications():
             success, error = _save_reminder_settings(job_id)
         elif action == 'save_call':
             success, error = _save_call(job_id)
+        elif action == 'send_followup':
+            success, error = _start_followup(job_id,
+                                             request.form.get('audience'))
         elif action == 'copy_from':
             source = request.form.get('source_job_id')
             if source == job_id or source not in jobs:
@@ -1415,16 +1534,12 @@ def admin_communications():
     templates = {kind: submitted.get(kind) or get_template(job_id, kind)
                  for kind in EMAIL_TEMPLATE_KINDS} if job_id else {}
 
-    placeholders = {
-        kind: {token: help_text for token, help_text in PLACEHOLDERS.items()
-               if KIND_ONLY_PLACEHOLDERS.get(token, kind) == kind}
-        for kind in EMAIL_TEMPLATE_KINDS
-    }
+    placeholders = {kind: placeholders_for(kind)
+                    for kind in EMAIL_TEMPLATE_KINDS}
 
     # What a blank field falls back to, shown as each field's placeholder.
     env_branding = get_job_branding(None)
     defaults = {
-        'company_name': env_branding['company_name'],
         'email_reply_to': env_branding['reply_to'],
         'email_cc': ', '.join(env_branding['cc']),
         'support_email': env_branding['support_email'],
@@ -1435,9 +1550,6 @@ def admin_communications():
         'agent_type': os.environ.get('CALLER_AGENT_TYPE',
                                      'integrity_reminder'),
         'agent_name': os.environ.get('CALLER_AGENT_NAME', 'Riya'),
-        'call_company_name': ((settings or {}).get('company_name')
-                              or os.environ.get('CALLER_COMPANY_NAME', '')),
-        'role_name': jobs.get(job_id, ''),
         'disqualification_rate': os.environ.get(
             'CALL_DISQUALIFICATION_RATE', 'eighty percent'),
         'api_base_url': os.environ.get('CALLER_API_BASE_URL',
@@ -1455,6 +1567,13 @@ def admin_communications():
                            defaults=defaults,
                            tab=tab,
                            admin_email=ADMIN_USERNAME,
+                           followup_counts=(get_followup_audience_counts(job_id)
+                                            if job_id else {}),
+                           followup_runs=(get_followup_runs(job_id)
+                                          if job_id else []),
+                           sample_booking_link=(booking_link_for(
+                               'CANDIDATE_ID', settings['link_id'])
+                               if settings else ''),
                            success=success,
                            error=error)
 
@@ -1647,7 +1766,29 @@ def admin_jobs():
     """Manage jobs - create new jobs and batches of existing ones"""
     def render(**kwargs):
         return render_template('admin_jobs.html', jobs=get_jobs(),
-                               configs=get_all_job_configs(), **kwargs)
+                               configs=get_all_job_configs(),
+                               usage=get_job_usage(), **kwargs)
+
+    if request.method == 'POST' and request.form.get('action') == 'delete_job':
+        job_id = request.form.get('job_id')
+        if not is_valid_job_id(job_id):
+            return render(error='Job not found')
+        job_name = get_job_name(job_id)
+        usage = get_job_usage()[job_id]
+        # Booked candidates lose their slot, so that needs its own
+        # explicit acknowledgement, not just the generic confirm.
+        if usage['bookings'] and request.form.get('confirm_bookings') != 'yes':
+            return render(error=(f'"{job_name}" has {usage["bookings"]} '
+                                 f'booked candidate(s). Tick the '
+                                 f'confirmation box to delete it.'))
+        result = delete_job(job_id)
+        if 'error' in result:
+            return render(error=result['error'])
+        c = result['counts']
+        print(f"[ADMIN] Deleted job {job_id} ({job_name}): {c}")
+        return render(success=(f'Deleted "{job_name}" with {c["candidates"]} '
+                               f'candidate(s), {c["bookings"]} booking(s) '
+                               f'and {c["slots"]} slot(s).'))
 
     if request.method == 'POST' and request.form.get('action') == 'add_batch':
         parent_id = request.form.get('parent_job_id')
@@ -1669,13 +1810,14 @@ def admin_jobs():
     if request.method == 'POST':
         job_id = request.form.get('job_id')
         job_name = request.form.get('job_name')
+        company_name = (request.form.get('company_name') or '').strip()
         start_time = request.form.get('start_time', '08:00')
         end_time = request.form.get('end_time', '00:00')
         duration = request.form.get('duration', '60')
         capacity = request.form.get('capacity', '15')
 
-        if not all([job_id, job_name]):
-            return render(error='Job ID and Job Name are required')
+        if not all([job_id, job_name, company_name]):
+            return render(error='Job ID, Job Name and Company Name are required')
 
         # Validate UUID format
         try:
@@ -1691,7 +1833,8 @@ def admin_jobs():
             if duration_int <= 0 or capacity_int <= 0:
                 raise ValueError("Duration and capacity must be positive")
 
-            result = create_job(job_id.strip(), job_name.strip(), start_time, end_time, duration_int, capacity_int)
+            result = create_job(job_id.strip(), job_name.strip(), start_time, end_time, duration_int, capacity_int,
+                                company_name=company_name)
 
             if 'error' in result:
                 return render(error=result['error'])

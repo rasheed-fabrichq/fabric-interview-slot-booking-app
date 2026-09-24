@@ -35,6 +35,11 @@ DEFAULT_TEMPLATES = {
         'subject': ('Reminder: Your {{Company Name}} AI Interview starts '
                     'at {{Start Time}} IST ({{Date}})'),
     },
+    'followup': {
+        'file': 'default_booking_followup.html',
+        'subject': ('Reminder: Book your {{Company Name}} AI Interview '
+                    'slot for {{Job Name}}'),
+    },
 }
 
 # Every placeholder a template may use, with the help text the admin
@@ -56,10 +61,35 @@ PLACEHOLDERS = {
     '{{FAQ Document Link}}': "The job's FAQ link",
     '{{Support Email}}': "The job's support email address",
     '{{Minutes Until}}': 'Reminder only: minutes until the slot starts',
+    '{{Booking Link}}': "Follow-up only: the candidate's slot booking link",
 }
 
-# Placeholders that only have a value for some kinds.
-KIND_ONLY_PLACEHOLDERS = {'{{Minutes Until}}': 'reminder'}
+# Placeholders that only have a value for some kinds; the rest work in
+# every kind. A follow-up goes to someone with no slot yet, so no slot
+# detail is available to it.
+_SLOT_KINDS = ('confirmation', 'reminder')
+PLACEHOLDER_KINDS = {
+    '{{Slot Date}}': _SLOT_KINDS,
+    '{{Date}}': _SLOT_KINDS,
+    '{{Day}}': _SLOT_KINDS,
+    '{{Start Time}}': _SLOT_KINDS,
+    '{{End Time}}': _SLOT_KINDS,
+    '{{Duration}}': _SLOT_KINDS,
+    '{{Assessment Link}}': _SLOT_KINDS,
+    '{{Unique Interview Link}}': _SLOT_KINDS,
+    '{{Minutes Until}}': ('reminder',),
+    '{{Booking Link}}': ('followup',),
+}
+
+
+def placeholders_for(kind):
+    """The placeholders usable in a kind, with their help text."""
+    return {token: help_text for token, help_text in PLACEHOLDERS.items()
+            if kind in PLACEHOLDER_KINDS.get(token, (kind,))}
+
+
+MISSING_COMPANY_ERROR = ('Company name is not set for this job. Set it in '
+                         'Admin > Communications > Branding.')
 
 DEFAULT_SUPPORT_EMAIL = 'support@fabrichq.ai'
 
@@ -105,16 +135,17 @@ def _split_addresses(raw):
 def get_job_branding(job_id):
     """Resolved sender and branding values for a job.
 
-    Each value is the job's own setting if it has one, else the .env
-    default, else a built-in default -- so a job set up with nothing
-    still sends a complete email.
+    The company name is the job's own and has no fallback: a job's
+    emails must never go out under another client's name, so a job
+    without one cannot send (see MISSING_COMPANY_ERROR). Every other
+    value is the job's own setting if it has one, else the .env
+    default, else a built-in default.
     """
     from database import get_job_communication
     job = (get_job_communication(job_id) if job_id else None) or {}
 
     return {
-        'company_name': (job.get('company_name')
-                         or _cfg('EMAIL_COMPANY_NAME', 'Fabric')),
+        'company_name': job.get('company_name') or None,
         'reply_to': (job.get('email_reply_to')
                      or _cfg('EMAIL_REPLY_TO', DEFAULT_SUPPORT_EMAIL)),
         # CC falls back to env only when the job has never set one; a
@@ -131,37 +162,41 @@ def get_job_branding(job_id):
 def find_unknown_placeholders(text, kind):
     """Placeholders in text that would not be filled for this kind."""
     unknown = []
-    for token in sorted(set(re.findall(r'{{[^}]+}}', text or ''))):
-        only_for = KIND_ONLY_PLACEHOLDERS.get(token)
-        if token not in PLACEHOLDERS or (only_for and only_for != kind):
-            unknown.append(token)
-    return unknown
+    allowed = placeholders_for(kind)
+    return [token for token in sorted(set(re.findall(r'{{[^}]+}}', text or '')))
+            if token not in allowed]
 
 
 def build_substitutions(kind, branding, candidate_name, candidate_email,
-                        job_name, slot_date, day_of_week, start_time,
-                        end_time, interview_link, duration_minutes=None,
-                        minutes_until=None):
+                        job_name, slot_date=None, day_of_week=None,
+                        start_time=None, end_time=None, interview_link=None,
+                        duration_minutes=None, minutes_until=None,
+                        booking_link=None):
     """Placeholder values for one email."""
     values = {
         '{{Candidate Name}}': candidate_name,
         '{{Candidate Email}}': candidate_email,
         '{{Job Name}}': job_name,
         '{{Company Name}}': branding['company_name'],
-        '{{Slot Date}}': f'{day_of_week}, {slot_date}',
-        '{{Date}}': slot_date,
-        '{{Day}}': day_of_week,
-        '{{Start Time}}': start_time,
-        '{{End Time}}': end_time,
-        '{{Duration}}': (f'{duration_minutes} Minutes'
-                         if duration_minutes else ''),
-        '{{Assessment Link}}': interview_link,
-        '{{Unique Interview Link}}': interview_link,
         '{{FAQ Document Link}}': branding['faq_link'],
         '{{Support Email}}': branding['support_email'],
     }
+    if kind in _SLOT_KINDS:
+        values.update({
+            '{{Slot Date}}': f'{day_of_week}, {slot_date}',
+            '{{Date}}': slot_date,
+            '{{Day}}': day_of_week,
+            '{{Start Time}}': start_time,
+            '{{End Time}}': end_time,
+            '{{Duration}}': (f'{duration_minutes} Minutes'
+                             if duration_minutes else ''),
+            '{{Assessment Link}}': interview_link,
+            '{{Unique Interview Link}}': interview_link,
+        })
     if kind == 'reminder':
         values['{{Minutes Until}}'] = str(minutes_until or 0)
+    if kind == 'followup':
+        values['{{Booking Link}}'] = booking_link
     return values
 
 
@@ -212,6 +247,7 @@ SAMPLE_VALUES = {
     'interview_link': 'https://app.fabrichq.ai/interview/sample/?candidate_id=sample',
     'duration_minutes': 30,
     'minutes_until': 15,
+    'booking_link': 'https://slot-booking.fabrichq.ai/book?candidate_id=sample&job_id=sample',
 }
 
 
@@ -222,7 +258,10 @@ def render_sample(job_id, job_name, kind, template=None):
     preview unsaved edits.
     """
     template = template or get_template(job_id, kind)
-    values = build_substitutions(kind, get_job_branding(job_id),
+    branding = get_job_branding(job_id)
+    if not branding['company_name']:
+        return None, None, MISSING_COMPANY_ERROR
+    values = build_substitutions(kind, branding,
                                  job_name=job_name, **SAMPLE_VALUES)
     return render_email(template, values)
 
@@ -347,6 +386,8 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
     Returns: (success: bool, error_message: str | None)
     """
     branding = get_job_branding(job_id)
+    if not branding['company_name']:
+        return False, MISSING_COMPANY_ERROR
     values = build_substitutions(
         'confirmation', branding, candidate_name, candidate_email, job_name,
         slot_date, day_of_week, start_time, end_time,
@@ -380,6 +421,8 @@ def send_slot_reminder(candidate_name, candidate_email, job_name,
     Returns: (success: bool, error_message: str | None)
     """
     branding = get_job_branding(job_id)
+    if not branding['company_name']:
+        return False, MISSING_COMPANY_ERROR
     values = build_substitutions(
         'reminder', branding, candidate_name, candidate_email, job_name,
         slot_date, day_of_week, start_time, end_time,
@@ -388,6 +431,33 @@ def send_slot_reminder(candidate_name, candidate_email, job_name,
 
     subject, html_content, error = render_email(
         get_template(job_id, 'reminder'), values)
+    if error:
+        return False, error
+
+    return send_raw_email(
+        mail_to=candidate_email,
+        subject=subject,
+        html_content=html_content,
+        reply_to=[branding['reply_to']],
+        company_name=branding['company_name'],
+    )
+
+
+def send_booking_followup(candidate_name, candidate_email, job_name,
+                          booking_link, job_id):
+    """Ask a candidate who has not booked yet to pick a slot.
+
+    Returns: (success: bool, error_message: str | None)
+    """
+    branding = get_job_branding(job_id)
+    if not branding['company_name']:
+        return False, MISSING_COMPANY_ERROR
+    values = build_substitutions(
+        'followup', branding, candidate_name, candidate_email, job_name,
+        booking_link=booking_link)
+
+    subject, html_content, error = render_email(
+        get_template(job_id, 'followup'), values)
     if error:
         return False, error
 

@@ -95,7 +95,7 @@ def init_database():
 
     # Per-job email templates, one row per job per kind. A job with no
     # row for a kind is sent the default template from email_templates/.
-    # kind: 'confirmation' | 'reminder'
+    # kind: 'confirmation' | 'reminder' | 'followup'
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS job_email_templates (
             job_id TEXT NOT NULL,
@@ -322,6 +322,44 @@ def init_database():
         ON notifications(status, channel)
     ''')
 
+    # Follow-up emails asking candidates who have not booked to pick a
+    # slot. One run per "send" click, one row per candidate emailed.
+    # Kept apart from notifications, which is the reminder worker's
+    # claim table and is keyed one-row-per-booking.
+    # audience: 'not_booked' | 'pending' | 'clicked'
+    # status:   'running' | 'completed'
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS followup_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL,
+            audience TEXT NOT NULL,
+            total INTEGER NOT NULL DEFAULT 0,
+            sent INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0,
+            skipped INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'running',
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            finished_at DATETIME,
+            FOREIGN KEY (job_id) REFERENCES job_configs(job_id)
+        )
+    ''')
+
+    # status: 'sent' | 'failed' | 'skipped'
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS followup_sends (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            job_id TEXT NOT NULL,
+            candidate_id TEXT NOT NULL,
+            email TEXT,
+            status TEXT NOT NULL,
+            error TEXT,
+            provider_ref TEXT,
+            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (run_id) REFERENCES followup_runs(id)
+        )
+    ''')
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -358,7 +396,8 @@ def get_all_jobs():
     return jobs
 
 
-def create_job(job_id, job_name, start_time='08:00', end_time='00:00', duration=60, capacity=15):
+def create_job(job_id, job_name, start_time='08:00', end_time='00:00', duration=60, capacity=15,
+               company_name=None):
     """Create a new job configuration"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -368,11 +407,12 @@ def create_job(job_id, job_name, start_time='08:00', end_time='00:00', duration=
         # here is addressed in links by its own ID.
         cursor.execute('''
             INSERT INTO job_configs
-            (job_id, job_name, link_id, slot_start_time, slot_end_time,
-             slot_duration_minutes, capacity_per_slot, booking_enabled)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-        ''', (job_id, job_name, job_id, start_time, end_time, duration,
-              capacity))
+            (job_id, job_name, link_id, company_name, slot_start_time,
+             slot_end_time, slot_duration_minutes, capacity_per_slot,
+             booking_enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ''', (job_id, job_name, job_id, company_name, start_time, end_time,
+              duration, capacity))
         conn.commit()
         conn.close()
         return {'success': True}
@@ -575,18 +615,18 @@ COMMUNICATION_FIELDS = (
     'call_role_name', 'call_disqualification_rate', 'call_api_base_url',
 )
 
-EMAIL_TEMPLATE_KINDS = ('confirmation', 'reminder')
+EMAIL_TEMPLATE_KINDS = ('confirmation', 'reminder', 'followup')
 
 
 def get_job_communication(job_id):
     """A job's communication settings, or None if the job does not exist.
 
-    Returns the COMMUNICATION_FIELDS columns plus job_name. Values are
+    Returns the COMMUNICATION_FIELDS columns plus job_name and link_id. Values are
     as stored: NULL means "use the default", resolved by the caller.
     """
     conn = get_db_connection()
     row = conn.execute(
-        f'SELECT job_id, job_name, {", ".join(COMMUNICATION_FIELDS)} '
+        f'SELECT job_id, job_name, link_id, {", ".join(COMMUNICATION_FIELDS)} '
         f'FROM job_configs WHERE job_id = ?', (job_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -596,7 +636,7 @@ def get_all_job_communications():
     """Every job's communication settings, keyed by job_id."""
     conn = get_db_connection()
     rows = conn.execute(
-        f'SELECT job_id, job_name, {", ".join(COMMUNICATION_FIELDS)} '
+        f'SELECT job_id, job_name, link_id, {", ".join(COMMUNICATION_FIELDS)} '
         f'FROM job_configs').fetchall()
     conn.close()
     return {row['job_id']: dict(row) for row in rows}
@@ -694,6 +734,210 @@ def copy_job_communication(source_job_id, target_job_id):
         ''', (target_job_id, datetime.now(), source_job_id))
 
     return {'success': True}
+
+
+# ==================== DELETION ====================
+
+# Every table holding per-job rows, in the order they are cleared: rows
+# that point at others go first.
+JOB_OWNED_TABLES = ('bookings', 'notifications', 'call_logs',
+                    'followup_sends', 'followup_runs', 'candidates', 'slots',
+                    'job_dates', 'job_email_templates')
+
+
+def get_job_usage():
+    """What deleting each job would remove, keyed by job_id."""
+    conn = get_db_connection()
+    rows = conn.execute('''
+        SELECT jc.job_id,
+            (SELECT COUNT(*) FROM candidates c WHERE c.job_id = jc.job_id) AS candidates,
+            (SELECT COUNT(*) FROM bookings b WHERE b.job_id = jc.job_id) AS bookings,
+            (SELECT COUNT(*) FROM slots s WHERE s.job_id = jc.job_id) AS slots,
+            (SELECT COUNT(*) FROM job_dates d WHERE d.job_id = jc.job_id) AS dates,
+            (SELECT COUNT(*) FROM job_configs b2 WHERE b2.parent_job_id = jc.job_id) AS batches
+        FROM job_configs jc
+    ''').fetchall()
+    conn.close()
+    return {r['job_id']: dict(r) for r in rows}
+
+
+def delete_job(job_id):
+    """Delete a job and everything belonging to it, in one transaction.
+
+    Removes its bookings, candidates, slots, dates, templates and
+    reminder/follow-up history. Candidates are not notified.
+
+    If the job has batches they are kept: the oldest batch becomes the
+    parent of the rest, so the group still hangs together. They keep the
+    shared link_id, so their candidates' links keep working.
+
+    Returns {'success': True, 'counts': {...}} or {'error': ...}.
+    """
+    usage = get_job_usage().get(job_id)
+    if usage is None:
+        return {'error': 'Job not found'}
+
+    with get_db_transaction() as conn:
+        batches = [r['job_id'] for r in conn.execute('''
+            SELECT job_id FROM job_configs WHERE parent_job_id = ?
+            ORDER BY created_at, id
+        ''', (job_id,)).fetchall()]
+        if batches:
+            new_parent = batches[0]
+            conn.execute('UPDATE job_configs SET parent_job_id = NULL '
+                         'WHERE job_id = ?', (new_parent,))
+            conn.execute('UPDATE job_configs SET parent_job_id = ? '
+                         'WHERE parent_job_id = ?', (new_parent, job_id))
+
+        for table in JOB_OWNED_TABLES:
+            conn.execute(f'DELETE FROM {table} WHERE job_id = ?', (job_id,))
+        conn.execute('DELETE FROM job_configs WHERE job_id = ?', (job_id,))
+
+    return {'success': True, 'counts': usage}
+
+
+def delete_candidates(candidate_keys):
+    """Delete candidates, freeing any slot they had booked.
+
+    candidate_keys is an iterable of (candidate_id, job_id). Each booked
+    candidate's seat is returned to its slot, so someone else can take
+    it. Their reminder claims go too, so nothing is sent for a booking
+    that no longer exists. Candidates are not notified.
+
+    Returns {'deleted': n, 'bookings_freed': m}.
+    """
+    deleted = freed = 0
+    with get_db_transaction() as conn:
+        for candidate_id, job_id in candidate_keys:
+            booking = conn.execute('''
+                SELECT slot_id FROM bookings
+                WHERE candidate_id = ? AND job_id = ?
+            ''', (candidate_id, job_id)).fetchone()
+            if booking:
+                conn.execute('''
+                    UPDATE slots SET booked_count = MAX(0, booked_count - 1)
+                    WHERE id = ?
+                ''', (booking['slot_id'],))
+                conn.execute('DELETE FROM bookings WHERE candidate_id = ? '
+                             'AND job_id = ?', (candidate_id, job_id))
+                freed += 1
+
+            conn.execute('DELETE FROM notifications WHERE candidate_id = ? '
+                         'AND job_id = ?', (candidate_id, job_id))
+            cursor = conn.execute('DELETE FROM candidates WHERE '
+                                  'candidate_id = ? AND job_id = ?',
+                                  (candidate_id, job_id))
+            deleted += cursor.rowcount
+
+    return {'deleted': deleted, 'bookings_freed': freed}
+
+
+# ==================== FOLLOW-UP EMAILS ====================
+
+FOLLOWUP_AUDIENCES = {
+    'not_booked': ('pending', 'clicked'),
+    'pending': ('pending',),
+    'clicked': ('clicked',),
+}
+
+
+def get_followup_recipients(job_id, audience):
+    """Candidates of a job who have not booked, filtered by status.
+
+    Includes link_id so the caller can build each booking link.
+    """
+    statuses = FOLLOWUP_AUDIENCES[audience]
+    conn = get_db_connection()
+    rows = conn.execute(f'''
+        SELECT c.candidate_id, c.job_id, c.name, c.email, c.status,
+               jc.job_name, jc.link_id
+        FROM candidates c
+        JOIN job_configs jc ON c.job_id = jc.job_id
+        WHERE c.job_id = ?
+          AND c.status IN ({", ".join("?" for _ in statuses)})
+          AND NOT EXISTS (SELECT 1 FROM bookings b
+                          WHERE b.candidate_id = c.candidate_id
+                            AND b.job_id = c.job_id)
+        ORDER BY c.created_at
+    ''', (job_id, *statuses)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_followup_audience_counts(job_id):
+    """How many candidates each audience would reach."""
+    return {audience: len(get_followup_recipients(job_id, audience))
+            for audience in FOLLOWUP_AUDIENCES}
+
+
+def create_followup_run(job_id, audience, total):
+    """Start a follow-up run, unless one for this job is already going.
+
+    Returns the run id, or None if a run started in the last 30 minutes
+    is still marked running -- the guard against a double-clicked Send
+    emailing everyone twice. An older 'running' row is treated as dead
+    (the process sending it was restarted) and does not block.
+    """
+    with get_db_transaction() as conn:
+        busy = conn.execute('''
+            SELECT 1 FROM followup_runs
+            WHERE job_id = ? AND status = 'running'
+              AND started_at > datetime('now', '-30 minutes')
+        ''', (job_id,)).fetchone()
+        if busy:
+            return None
+        cursor = conn.execute('''
+            INSERT INTO followup_runs (job_id, audience, total)
+            VALUES (?, ?, ?)
+        ''', (job_id, audience, total))
+        return cursor.lastrowid
+
+
+def record_followup_send(run_id, job_id, candidate_id, email, status,
+                         error=None, provider_ref=None):
+    """Log one candidate's follow-up and bump the run's counters."""
+    if status not in ('sent', 'failed', 'skipped'):
+        raise ValueError(f'Unknown follow-up status: {status}')
+    with get_db_transaction() as conn:
+        conn.execute('''
+            INSERT INTO followup_sends
+            (run_id, job_id, candidate_id, email, status, error, provider_ref)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (run_id, job_id, candidate_id, email, status, error,
+              provider_ref))
+        conn.execute(f'UPDATE followup_runs SET {status} = {status} + 1 '
+                     f'WHERE id = ?', (run_id,))
+
+
+def finish_followup_run(run_id):
+    conn = get_db_connection()
+    conn.execute('''
+        UPDATE followup_runs SET status = 'completed',
+            finished_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (run_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_followup_runs(job_id, limit=10):
+    """Recent follow-up runs for a job, newest first, with failures."""
+    conn = get_db_connection()
+    runs = [dict(r) for r in conn.execute('''
+        SELECT * FROM followup_runs WHERE job_id = ?
+        ORDER BY id DESC LIMIT ?
+    ''', (job_id, limit)).fetchall()]
+    for run in runs:
+        run['failures'] = [dict(r) for r in conn.execute('''
+            SELECT fs.email, fs.error, c.name
+            FROM followup_sends fs
+            LEFT JOIN candidates c
+              ON c.candidate_id = fs.candidate_id AND c.job_id = fs.job_id
+            WHERE fs.run_id = ? AND fs.status = 'failed'
+            ORDER BY fs.id
+        ''', (run['id'],)).fetchall()]
+    conn.close()
+    return runs
 
 
 # ==================== JOB DATES FUNCTIONS ====================

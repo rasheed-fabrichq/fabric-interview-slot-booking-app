@@ -14,9 +14,8 @@ Recognised keys:
     assistant_id           the assistant the calling system should run
     agent_type             e.g. 'integrity_reminder'
     agent_name             the voice agent's name, e.g. 'Riya'
-    company_name           the client as spoken; defaults to the job's
-                           company name
-    role_name              spoken role; defaults to the job's name
+    company_name           the client as spoken; required for a call
+    role_name              the role as spoken; required for a call
     disqualification_rate  spoken, e.g. 'eighty percent'
     lead_minutes           minutes before the slot to call
     api_base_url           only if this job uses a different service
@@ -47,18 +46,22 @@ COLUMNS = {
 ALLOWED_KEYS = tuple(COLUMNS)
 
 
-def _to_call_config(row):
-    """A job_configs row as call overrides, omitting unset values.
+# Settings a call cannot be placed without. They are what the agent
+# says about the client, so there is deliberately no default: a guess
+# would have the agent name the wrong company or role.
+REQUIRED_KEYS = ('company_name', 'role_name')
 
-    The spoken company falls back to the job's company name before the
-    env default: a job set up for a client should not have its agent
-    name a different company just because the call field was left blank.
-    """
-    config = {key: row[column] for key, column in COLUMNS.items()
-              if row.get(column) not in (None, '')}
-    if 'company_name' not in config and row.get('company_name'):
-        config['company_name'] = row['company_name']
-    return config
+
+def _to_call_config(row):
+    """A job_configs row as call overrides, omitting unset values."""
+    return {key: row[column] for key, column in COLUMNS.items()
+            if row.get(column) not in (None, '')}
+
+
+def missing_required(config):
+    """Labels of required call settings a job's config lacks."""
+    labels = {'company_name': 'company name', 'role_name': 'role name'}
+    return [labels[k] for k in REQUIRED_KEYS if not (config or {}).get(k)]
 
 
 def get_job_call_config(job_id):

@@ -3,6 +3,18 @@
 {% block page_title %}Jobs{% endblock %}
 {% block page_subtitle %}Create new job positions and view existing jobs.{% endblock %}
 
+{% macro delete_button(job) %}
+{% set u = usage.get(job.job_id, {}) %}
+<button type="button" class="btn btn-sm btn-outline-danger js-delete-job"
+        data-bs-toggle="modal" data-bs-target="#deleteJobModal"
+        data-job-id="{{ job.job_id }}" data-job-name="{{ job.job_name }}"
+        data-candidates="{{ u.candidates or 0 }}" data-bookings="{{ u.bookings or 0 }}"
+        data-slots="{{ u.slots or 0 }}" data-dates="{{ u.dates or 0 }}" data-batches="{{ u.batches or 0 }}"
+        title="Delete {{ job.job_name }}" aria-label="Delete {{ job.job_name }}">
+    <i class="bi bi-trash"></i>
+</button>
+{% endmacro %}
+
 {% block admin_content %}
 {% include "_admin_alerts.html" %}
 
@@ -26,10 +38,16 @@
                                    placeholder="e.g., fc4c9c14-208c-427a-be2e-4d0080f286d6" required>
                             <span class="form-hint">Must be a valid UUID. Use the job ID from the application link (<code>/jobs/&lt;ID&gt;/</code>), or the assistant ID if you'll upload interview links (<code>/interviews/&lt;ID&gt;/</code>).</span>
                         </div>
-                        <div class="mb-0">
+                        <div class="mb-3">
                             <label class="form-label">Job Name<span class="required-mark">*</span></label>
                             <input type="text" name="job_name" class="form-control"
                                    placeholder="e.g., Software Development Engineer I" required>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">Company Name<span class="required-mark">*</span></label>
+                            <input type="text" name="company_name" class="form-control"
+                                   placeholder="e.g., Acme Analytics" required>
+                            <span class="form-hint">The client this job is for. Used in every email; editable later in Communications.</span>
                         </div>
                     </div>
 
@@ -113,11 +131,14 @@
                             </div>
                             <div class="id-mono" title="Link ID: the ID in candidates' links and booking links">{{ job.link_id }}</div>
                         </div>
-                        <button class="btn btn-sm btn-outline-primary flex-shrink-0" type="button"
-                                data-bs-toggle="collapse" data-bs-target="#batch-form-{{ loop.index }}"
-                                aria-expanded="false" aria-controls="batch-form-{{ loop.index }}">
-                            <i class="bi bi-diagram-2"></i> Add batch
-                        </button>
+                        <div class="d-flex gap-1 flex-shrink-0">
+                            <button class="btn btn-sm btn-outline-primary" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#batch-form-{{ loop.index }}"
+                                    aria-expanded="false" aria-controls="batch-form-{{ loop.index }}">
+                                <i class="bi bi-diagram-2"></i> Add batch
+                            </button>
+                            {{ delete_button(job) }}
+                        </div>
                     </div>
 
                     <div class="collapse" id="batch-form-{{ loop.index }}">
@@ -142,10 +163,11 @@
                     {% if batches %}
                     <ul class="list-unstyled mb-0 mt-3 ps-3 border-start">
                         {% for b in batches %}
-                        <li class="py-1">
+                        <li class="py-1 d-flex align-items-center gap-1">
                             <i class="bi bi-arrow-return-right text-muted"></i>
                             <span class="fw-medium">{{ b.job_name }}</span>
-                            <span class="status-pill pill-neutral no-dot ms-1">Batch</span>
+                            <span class="status-pill pill-neutral no-dot ms-1 me-auto">Batch</span>
+                            {{ delete_button(b) }}
                         </li>
                         {% endfor %}
                     </ul>
@@ -188,4 +210,78 @@
         </div>
     </div>
 </div>
+
+<!-- Delete job confirmation -->
+<div class="modal fade" id="deleteJobModal" tabindex="-1" aria-labelledby="deleteJobModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="POST" action="{{ url_for('admin_jobs') }}" class="modal-content">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="delete_job">
+            <input type="hidden" name="job_id" id="delete-job-id">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="deleteJobModalLabel">Delete <span id="delete-job-name"></span>?</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">This permanently deletes the job and everything in it:</p>
+                <ul class="mb-3">
+                    <li><strong id="delete-candidates"></strong> uploaded candidate(s)</li>
+                    <li><strong id="delete-slots"></strong> slot(s) on <strong id="delete-dates"></strong> date(s)</li>
+                    <li>Its email templates, settings and reminder history</li>
+                </ul>
+                <div class="callout callout-danger d-none" id="delete-bookings-warning">
+                    <i class="bi bi-exclamation-octagon"></i>
+                    <div>
+                        <div class="callout-title"><span id="delete-bookings"></span> candidate(s) have already booked a slot.</div>
+                        Their bookings will be deleted and they will <strong>not</strong> be notified.
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" name="confirm_bookings" value="yes" id="confirm-bookings">
+                            <label class="form-check-label" for="confirm-bookings">I understand booked candidates will lose their slots</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="callout callout-info d-none mt-3" id="delete-batches-note">
+                    <i class="bi bi-diagram-2"></i>
+                    <div>This job has <span id="delete-batches"></span> batch(es). They are kept, and the first one becomes the main job.</div>
+                </div>
+                <p class="text-danger small mb-0 mt-3">This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-danger" id="delete-job-submit"><i class="bi bi-trash"></i> Delete job</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const modal = document.getElementById('deleteJobModal');
+    const confirmBox = document.getElementById('confirm-bookings');
+    const submit = document.getElementById('delete-job-submit');
+    function syncSubmit(hasBookings) {
+        submit.disabled = hasBookings && !confirmBox.checked;
+    }
+    modal.addEventListener('show.bs.modal', function (event) {
+        const d = event.relatedTarget.dataset;
+        const bookings = parseInt(d.bookings, 10) || 0;
+        const batches = parseInt(d.batches, 10) || 0;
+        document.getElementById('delete-job-id').value = d.jobId;
+        document.getElementById('delete-job-name').textContent = d.jobName;
+        document.getElementById('delete-candidates').textContent = d.candidates;
+        document.getElementById('delete-slots').textContent = d.slots;
+        document.getElementById('delete-dates').textContent = d.dates;
+        document.getElementById('delete-bookings').textContent = bookings;
+        document.getElementById('delete-batches').textContent = batches;
+        document.getElementById('delete-bookings-warning').classList.toggle('d-none', !bookings);
+        document.getElementById('delete-batches-note').classList.toggle('d-none', !batches);
+        confirmBox.checked = false;
+        confirmBox.required = bookings > 0;
+        syncSubmit(bookings > 0);
+        confirmBox.onchange = function () { syncSubmit(bookings > 0); };
+    });
+})();
+</script>
 {% endblock %}

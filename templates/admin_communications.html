@@ -1,7 +1,7 @@
 {% extends "admin_base.html" %}
 
 {% block page_title %}Communications{% endblock %}
-{% block page_subtitle %}Branding, emails and reminders each job's candidates receive. Blank fields use the default shown in grey.{% endblock %}
+{% block page_subtitle %}Branding, emails and reminders each job's candidates receive. Fields are pre-filled with the defaults; change any that differ for this job.{% endblock %}
 
 {% block page_actions %}
 {% if job_id %}
@@ -115,6 +115,13 @@
 </div>
 {% else %}
 
+{% if not settings.company_name %}
+<div class="callout callout-warning mb-4">
+    <i class="bi bi-exclamation-triangle"></i>
+    <div><strong>No company name set for this job.</strong> Emails for this job cannot be sent until you set one in the Branding tab.</div>
+</div>
+{% endif %}
+
 <!-- Job picker -->
 <div class="card mb-4">
     <div class="card-body">
@@ -130,14 +137,24 @@
             </div>
             <div class="col-md-6 col-lg-7">
                 <div class="comms-summary">
-                    <span class="status-pill pill-info"><i class="bi bi-building"></i> {{ settings.company_name or defaults.company_name }}{% if not settings.company_name %} (default){% endif %}</span>
+                    {% if settings.company_name %}
+                    <span class="status-pill pill-info"><i class="bi bi-building"></i> {{ settings.company_name }}</span>
+                    {% else %}
+                    <span class="status-pill pill-danger"><i class="bi bi-building"></i> Company name not set</span>
+                    {% endif %}
                     <span class="status-pill {{ 'pill-success' if settings.reminder_email_enabled else 'pill-neutral' }}">
                         <i class="bi bi-envelope"></i> Reminder email {{ 'on' if settings.reminder_email_enabled else 'off' }}
                     </span>
                     {% set call_on = settings.call_enabled if settings.call_enabled is not none else (defaults.calls_enabled|lower in ['1', 'true', 'yes', 'on']) %}
+                    {% if call_on and not (settings.call_company_name and settings.call_role_name) %}
+                    <span class="status-pill pill-warning" title="Calls are skipped until the spoken company name and role are set">
+                        <i class="bi bi-telephone"></i> AI call on, needs company &amp; role
+                    </span>
+                    {% else %}
                     <span class="status-pill {{ 'pill-success' if call_on else 'pill-neutral' }}">
                         <i class="bi bi-telephone"></i> AI call {{ 'on' if call_on else 'off' }}{% if settings.call_enabled is none %} (default){% endif %}
                     </span>
+                    {% endif %}
                 </div>
             </div>
             <noscript><div class="col-12"><button class="btn btn-primary">Load</button></div></noscript>
@@ -146,7 +163,7 @@
 </div>
 
 <ul class="nav nav-tabs comms-tabs mb-4" role="tablist">
-    {% for key, label, icon in [('branding', 'Branding', 'bi-palette'), ('confirmation', 'Confirmation email', 'bi-envelope-check'), ('reminder', 'Reminder email', 'bi-alarm'), ('call', 'AI call reminder', 'bi-telephone-outbound')] %}
+    {% for key, label, icon in [('branding', 'Branding', 'bi-palette'), ('confirmation', 'Confirmation email', 'bi-envelope-check'), ('reminder', 'Reminder email', 'bi-alarm'), ('followup', 'Follow-up email', 'bi-envelope-arrow-up'), ('call', 'AI call reminder', 'bi-telephone-outbound')] %}
     <li class="nav-item" role="presentation">
         <button class="nav-link {% if tab == key %}active{% endif %}" id="tab-{{ key }}" data-bs-toggle="tab" data-bs-target="#pane-{{ key }}" data-tab="{{ key }}" type="button" role="tab" aria-controls="pane-{{ key }}" aria-selected="{{ 'true' if tab == key else 'false' }}">
             <i class="bi {{ icon }}"></i> {{ label }}
@@ -169,28 +186,28 @@
                     {{ hidden_fields('save_branding', 'branding') }}
                     <div class="row g-4">
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold" for="company_name">Company name</label>
-                            <input type="text" class="form-control" id="company_name" name="company_name" value="{{ settings.company_name or '' }}" placeholder="{{ defaults.company_name }}">
+                            <label class="form-label fw-semibold" for="company_name">Company name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="company_name" name="company_name" value="{{ settings.company_name or '' }}" placeholder="e.g. Acme Analytics" required>
                             <div class="form-hint">Sender shows as "Team &lt;company&gt;". Fills <code>{{ '{{Company Name}}' }}</code>.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="support_email">Support email</label>
-                            <input type="text" class="form-control" id="support_email" name="support_email" value="{{ settings.support_email or '' }}" placeholder="{{ defaults.support_email }}">
+                            <input type="text" class="form-control" id="support_email" name="support_email" value="{{ settings.support_email or defaults.support_email }}">
                             <div class="form-hint">Shown to candidates. Fills <code>{{ '{{Support Email}}' }}</code>.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="email_reply_to">Reply-to address</label>
-                            <input type="text" class="form-control" id="email_reply_to" name="email_reply_to" value="{{ settings.email_reply_to or '' }}" placeholder="{{ defaults.email_reply_to }}">
+                            <input type="text" class="form-control" id="email_reply_to" name="email_reply_to" value="{{ settings.email_reply_to or defaults.email_reply_to }}">
                             <div class="form-hint">Where candidate replies go.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="email_cc">CC on confirmations</label>
-                            <input type="text" class="form-control" id="email_cc" name="email_cc" value="{{ settings.email_cc or '' }}" placeholder="{{ defaults.email_cc or 'None' }}">
+                            <input type="text" class="form-control" id="email_cc" name="email_cc" value="{{ settings.email_cc or defaults.email_cc }}" placeholder="None">
                             <div class="form-hint">Comma-separated. Visible to the candidate; each address gets a copy of every booking.</div>
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-semibold" for="faq_link">FAQ link</label>
-                            <input type="url" class="form-control" id="faq_link" name="faq_link" value="{{ settings.faq_link or '' }}" placeholder="{{ defaults.faq_link }}">
+                            <input type="url" class="form-control" id="faq_link" name="faq_link" value="{{ settings.faq_link or defaults.faq_link }}">
                             <div class="form-hint">Linked from emails and the booking page footer. Fills <code>{{ '{{FAQ Document Link}}' }}</code>.</div>
                         </div>
                     </div>
@@ -222,7 +239,7 @@
                     </div>
                     <div class="col-md-4">
                         <label class="form-label fw-semibold" for="reminder_lead_minutes">Minutes before the slot</label>
-                        <input type="number" min="1" class="form-control" id="reminder_lead_minutes" name="reminder_lead_minutes" value="{{ settings.reminder_lead_minutes or '' }}" placeholder="{{ defaults.reminder_lead_minutes }}">
+                        <input type="number" min="1" class="form-control" id="reminder_lead_minutes" name="reminder_lead_minutes" value="{{ settings.reminder_lead_minutes or defaults.reminder_lead_minutes }}">
                     </div>
                     <div class="col-md-3">
                         <button type="submit" class="btn btn-primary w-100"><i class="bi bi-check2"></i> Save</button>
@@ -231,6 +248,73 @@
             </div>
         </div>
         {{ template_editor('reminder', 'Reminder email', 'Sent shortly before the slot starts.') }}
+    </div>
+
+    <!-- Follow-up email -->
+    <div class="tab-pane fade {% if tab == 'followup' %}show active{% endif %}" id="pane-followup" role="tabpanel" aria-labelledby="tab-followup">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h2 class="h6 mb-0">Send a follow-up now</h2>
+                <small class="text-muted">Emails candidates of <strong>{{ job_name }}</strong> who have not booked yet, each with their own booking link. Uses the saved template below.</small>
+            </div>
+            <div class="card-body">
+                <form method="POST" class="row g-3 align-items-end js-confirm"
+                      data-confirm="Send the follow-up email now? Each selected candidate gets one email.">
+                    {{ hidden_fields('send_followup', 'followup') }}
+                    <div class="col-md-8">
+                        <label class="form-label fw-semibold" for="audience">Send to</label>
+                        <select class="form-select" id="audience" name="audience">
+                            <option value="not_booked">Everyone not booked yet ({{ followup_counts.not_booked }})</option>
+                            <option value="pending">Never opened their booking link ({{ followup_counts.pending }})</option>
+                            <option value="clicked">Opened the link but did not book ({{ followup_counts.clicked }})</option>
+                        </select>
+                        <div class="form-hint">Booking links look like <code class="text-break">{{ sample_booking_link }}</code>. Set <code>BOOKING_BASE_URL</code> in .env to change the domain.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-primary w-100" {% if not followup_counts.not_booked %}disabled{% endif %}>
+                            <i class="bi bi-send"></i> Send follow-up
+                        </button>
+                    </div>
+                </form>
+
+                {% if followup_runs %}
+                <div class="form-section-title mt-4">Recent follow-ups</div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr><th>Started</th><th>Sent to</th><th class="text-end">Total</th><th class="text-end">Sent</th><th class="text-end">Failed</th><th class="text-end">Skipped</th><th>Status</th></tr></thead>
+                        <tbody>
+                        {% for run in followup_runs %}
+                        <tr>
+                            <td class="text-nowrap">{{ run.started_at }}</td>
+                            <td>{{ {'not_booked': 'Not booked', 'pending': 'Never opened', 'clicked': 'Opened, not booked'}[run.audience] }}</td>
+                            <td class="text-end">{{ run.total }}</td>
+                            <td class="text-end">{{ run.sent }}</td>
+                            <td class="text-end">{{ run.failed }}</td>
+                            <td class="text-end">{{ run.skipped }}</td>
+                            <td>
+                                {% if run.status == 'running' %}
+                                <span class="status-pill pill-warning">Sending {{ run.sent + run.failed + run.skipped }}/{{ run.total }}</span>
+                                {% elif run.failed %}
+                                <span class="status-pill pill-danger">Done with failures</span>
+                                {% else %}
+                                <span class="status-pill pill-success">Done</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if run.failures %}
+                        <tr><td colspan="7" class="bg-body-tertiary small">
+                            {% for f in run.failures[:10] %}<div><strong>{{ f.name or f.email }}</strong> ({{ f.email }}): {{ f.error }}</div>{% endfor %}
+                            {% if run.failures|length > 10 %}<div class="text-muted">…and {{ run.failures|length - 10 }} more</div>{% endif %}
+                        </td></tr>
+                        {% endif %}
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {{ template_editor('followup', 'Follow-up email', 'Sent when you click Send follow-up above.') }}
     </div>
 
     <!-- AI call -->
@@ -255,41 +339,41 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="lead_minutes">Minutes before the slot</label>
-                            <input type="number" min="1" class="form-control" id="lead_minutes" name="lead_minutes" value="{{ settings.call_lead_minutes or '' }}" placeholder="{{ defaults.call_lead_minutes }}">
+                            <input type="number" min="1" class="form-control" id="lead_minutes" name="lead_minutes" value="{{ settings.call_lead_minutes or defaults.call_lead_minutes }}">
                         </div>
 
                         <div class="col-12"><div class="form-section-title">What the agent says</div></div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="agent_name">Agent name</label>
-                            <input type="text" class="form-control" id="agent_name" name="agent_name" value="{{ settings.call_agent_name or '' }}" placeholder="{{ defaults.agent_name }}">
+                            <input type="text" class="form-control" id="agent_name" name="agent_name" value="{{ settings.call_agent_name or defaults.agent_name }}">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold" for="call_company_name">Company name (spoken)</label>
-                            <input type="text" class="form-control" id="call_company_name" name="company_name" value="{{ settings.call_company_name or '' }}" placeholder="{{ defaults.call_company_name }}">
-                            <div class="form-hint">Blank uses the branding company name. Spell it how it should sound.</div>
+                            <label class="form-label fw-semibold" for="call_company_name">Company name (spoken) <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="call_company_name" name="company_name" value="{{ settings.call_company_name or '' }}" placeholder="e.g. Acme Analytics" required>
+                            <div class="form-hint">Spell it how it should sound.</div>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold" for="role_name">Role (spoken)</label>
-                            <input type="text" class="form-control" id="role_name" name="role_name" value="{{ settings.call_role_name or '' }}" placeholder="{{ defaults.role_name }}">
-                            <div class="form-hint">Blank uses the job name.</div>
+                            <label class="form-label fw-semibold" for="role_name">Role (spoken) <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="role_name" name="role_name" value="{{ settings.call_role_name or '' }}" placeholder="e.g. HR Intern" required>
+                            <div class="form-hint">Write it as the agent should say it.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="disqualification_rate">Disqualification rate (spoken)</label>
-                            <input type="text" class="form-control" id="disqualification_rate" name="disqualification_rate" value="{{ settings.call_disqualification_rate or '' }}" placeholder="{{ defaults.disqualification_rate }}">
+                            <input type="text" class="form-control" id="disqualification_rate" name="disqualification_rate" value="{{ settings.call_disqualification_rate or defaults.disqualification_rate }}">
                         </div>
 
                         <div class="col-12"><div class="form-section-title">Calling system</div></div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="assistant_id">Assistant ID</label>
-                            <input type="text" class="form-control font-monospace" id="assistant_id" name="assistant_id" value="{{ settings.call_assistant_id or '' }}" placeholder="{{ defaults.assistant_id }}">
+                            <input type="text" class="form-control font-monospace" id="assistant_id" name="assistant_id" value="{{ settings.call_assistant_id or defaults.assistant_id }}">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="agent_type">Agent type</label>
-                            <input type="text" class="form-control" id="agent_type" name="agent_type" value="{{ settings.call_agent_type or '' }}" placeholder="{{ defaults.agent_type }}">
+                            <input type="text" class="form-control" id="agent_type" name="agent_type" value="{{ settings.call_agent_type or defaults.agent_type }}">
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-semibold" for="api_base_url">API base URL</label>
-                            <input type="text" class="form-control" id="api_base_url" name="api_base_url" value="{{ settings.call_api_base_url or '' }}" placeholder="{{ defaults.api_base_url }}">
+                            <input type="text" class="form-control" id="api_base_url" name="api_base_url" value="{{ settings.call_api_base_url or defaults.api_base_url }}">
                             <div class="form-hint">Only if this job uses a different calling service.</div>
                         </div>
                     </div>
