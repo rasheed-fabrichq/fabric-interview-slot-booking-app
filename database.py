@@ -243,6 +243,14 @@ def set_setting(key, value):
     return {'success': True}
 
 
+def delete_setting(key):
+    """Remove a value from the settings table."""
+    conn = get_db_connection()
+    conn.execute('DELETE FROM settings WHERE key = ?', (key,))
+    conn.commit()
+    conn.close()
+
+
 def get_slot_capacity():
     """Number of concurrent interviews allowed per slot, across ALL jobs."""
     return int(get_setting('slot_capacity', DEFAULT_SLOT_CAPACITY))

@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Email Templates{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+            <div>
+                <h2 class="mb-0">Email Templates</h2>
+                <small class="text-muted">The confirmation email is sent after a candidate books a slot, for every job.</small>
+            </div>
+            <a href="/admin/dashboard" class="btn btn-outline-primary">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-xl-8">
+        <div class="card shadow">
+            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <h5 class="mb-0">Confirmation email</h5>
+                {% if template.is_custom %}
+                <span class="badge bg-primary">Custom template</span>
+                {% else %}
+                <span class="badge bg-secondary">Using default template</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <form method="POST" id="template-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="save">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="subject">Subject</label>
+                        <input type="text" class="form-control template-field" id="subject" name="subject" value="{{ template.subject }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold d-flex justify-content-between flex-wrap gap-1" for="body">
+                            <span>HTML body</span>
+                            <small class="text-muted fw-normal">Paste the full email HTML. Click a placeholder to insert it at the cursor.</small>
+                        </label>
+                        <textarea class="form-control template-field template-body" id="body" name="body" rows="20" spellcheck="false" required>{{ template.body }}</textarea>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check2"></i> Save template</button>
+                        <button type="button" class="btn btn-outline-primary" id="preview-btn"><i class="bi bi-eye"></i> Preview</button>
+                        <div class="input-group test-send-group ms-sm-auto">
+                            <input type="email" class="form-control" id="test-to" value="{{ admin_email }}" aria-label="Send test email to">
+                            <button type="button" class="btn btn-outline-secondary" id="test-btn"><i class="bi bi-send"></i> Send test</button>
+                        </div>
+                    </div>
+                    <div id="feedback" class="mt-3" role="status"></div>
+                </form>
+            </div>
+            {% if template.is_custom %}
+            <div class="card-footer bg-transparent d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <small class="text-muted">Resetting deletes the saved template and goes back to the built-in default.</small>
+                <form method="POST" id="reset-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="reset">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-arrow-counterclockwise"></i> Reset to default</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-xl-4">
+        <div class="card shadow placeholder-card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-braces me-1"></i> Placeholders</h5>
+                <small class="text-muted">Work in the subject and the body</small>
+            </div>
+            <ul class="list-group list-group-flush placeholder-list">
+                {% for token, help_text in placeholders.items() %}
+                <li class="list-group-item">
+                    <button type="button" class="placeholder-chip js-insert" data-token="{{ token }}" title="Insert {{ token }}">{{ token }}</button>
+                    <div class="small text-muted mt-1">{{ help_text }}</div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Preview modal -->
+<div class="modal fade" id="previewModal" tabindex="-1" aria-labelledby="previewModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title" id="previewModalLabel">Email preview</h5>
+                    <small class="text-muted">Sample candidate data · unsaved edits included</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="preview-subject"><span class="text-muted">Subject:</span> <strong id="preview-subject"></strong></div>
+                <iframe id="preview-frame" class="preview-frame" title="Email preview" sandbox=""></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .template-body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8125rem; line-height: 1.5; min-height: 22rem; }
+    .test-send-group { max-width: 22rem; }
+    .placeholder-card { position: sticky; top: 1rem; }
+    .placeholder-list { max-height: 34rem; overflow-y: auto; }
+    .placeholder-chip {
+        border: 1px solid #cfe2ff; background: #e7f1ff; color: #0a58ca;
+        border-radius: 6px; padding: .15rem .5rem; cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8125rem;
+    }
+    .placeholder-chip:hover { background: #cfe2ff; }
+    .preview-subject { padding: .75rem 1rem; border-bottom: 1px solid #dee2e6; background: #f8f9fa; }
+    .preview-frame { width: 100%; height: 70vh; border: 0; background: #fff; display: block; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const CSRF = {{ csrf_token()|tojson }};
+    const PREVIEW_URL = {{ url_for('admin_email_templates_preview')|tojson }};
+    const TEST_URL = {{ url_for('admin_email_templates_test')|tojson }};
+    const subjectField = document.getElementById('subject');
+    const bodyField = document.getElementById('body');
+
+    // Placeholder chips insert at the cursor of the last-focused field
+    // (subject or body); the body by default.
+    let lastField = bodyField;
+    [subjectField, bodyField].forEach(function (field) {
+        field.addEventListener('focus', function () { lastField = field; });
+    });
+    document.querySelectorAll('.js-insert').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+            const field = lastField;
+            const token = chip.dataset.token;
+            const start = field.selectionStart ?? field.value.length;
+            const end = field.selectionEnd ?? field.value.length;
+            field.value = field.value.slice(0, start) + token + field.value.slice(end);
+            field.focus();
+            field.setSelectionRange(start + token.length, start + token.length);
+        });
+    });
+
+    function feedback(type, message) {
+        const box = document.getElementById('feedback');
+        box.innerHTML = '';
+        if (!message) return;
+        const div = document.createElement('div');
+        div.className = 'alert alert-' + type + ' mb-0 py-2';
+        div.textContent = message;
+        box.appendChild(div);
+    }
+
+    function post(url, payload) {
+        return fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+            body: JSON.stringify(payload),
+        }).then(function (res) {
+            return res.json().catch(function () { return {error: 'Unexpected response (' + res.status + ')'}; })
+                .then(function (data) { return {ok: res.ok, data: data}; });
+        });
+    }
+
+    function editorPayload() {
+        return {subject: subjectField.value, body: bodyField.value};
+    }
+
+    const previewModal = new bootstrap.Modal(document.getElementById('previewModal'));
+    const previewBtn = document.getElementById('preview-btn');
+    previewBtn.addEventListener('click', function () {
+        feedback();
+        previewBtn.disabled = true;
+        post(PREVIEW_URL, editorPayload()).then(function (r) {
+            if (!r.ok) { feedback('danger', r.data.error || 'Preview failed'); return; }
+            document.getElementById('preview-subject').textContent = r.data.subject;
+            document.getElementById('preview-frame').srcdoc = r.data.html;
+            previewModal.show();
+        }).catch(function () {
+            feedback('danger', 'Could not reach the server');
+        }).finally(function () { previewBtn.disabled = false; });
+    });
+
+    const testBtn = document.getElementById('test-btn');
+    testBtn.addEventListener('click', function () {
+        const payload = editorPayload();
+        payload.to = document.getElementById('test-to').value;
+        feedback('info', 'Sending test email…');
+        testBtn.disabled = true;
+        post(TEST_URL, payload).then(function (r) {
+            if (!r.ok) { feedback('danger', r.data.error || 'Send failed'); return; }
+            feedback('success', r.data.message);
+        }).catch(function () {
+            feedback('danger', 'Could not reach the server');
+        }).finally(function () { testBtn.disabled = false; });
+    });
+
+    const resetForm = document.getElementById('reset-form');
+    if (resetForm) {
+        resetForm.addEventListener('submit', function (e) {
+            if (!window.confirm('Reset the confirmation email to the default template? The saved template will be deleted.')) {
+                e.preventDefault();
+            }
+        });
+    }
+})();
+</script>
+{% endblock %}

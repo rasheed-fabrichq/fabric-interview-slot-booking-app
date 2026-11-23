@@ -2,6 +2,7 @@
 Email utility for sending booking confirmation emails via AWS SES.
 """
 import boto3
+import html
 import logging
 import os
 import re
@@ -17,22 +18,167 @@ def _cfg(key, default=''):
     return os.environ.get(key, default)
 
 
-# The confirmation email body lives in email_templates/ so the markup can
-# be edited without touching Python. Pick the file per deployment with
-# CONFIRMATION_EMAIL_TEMPLATE in .env. Placeholders it may use are the
-# keys substituted in send_booking_confirmation below.
+# The confirmation email is edited in Admin > Email Templates and stored
+# in the settings table. Until one is saved there, the built-in default
+# is used: the file named by CONFIRMATION_EMAIL_TEMPLATE in .env (in
+# email_templates/) with CONFIRMATION_EMAIL_SUBJECT, else the generic
+# default below.
 TEMPLATE_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'email_templates')
 DEFAULT_TEMPLATE_FILE = 'default_slot_confirmed.html'
 DEFAULT_SUBJECT = ('Your AI Interview is confirmed – {{Job Name}}, '
                    '{{Slot Date}} {{Start Time}} IST')
 
+# Settings-table keys for the saved template.
+SUBJECT_SETTING = 'confirmation_email_subject'
+BODY_SETTING = 'confirmation_email_body'
 
-def _load_template():
-    """Read the template at send time, so .env changes need no restart."""
+# Every placeholder the confirmation email can use, with help text for
+# the editor. Anything else is rejected on save.
+PLACEHOLDERS = {
+    '{{Candidate Name}}': "Candidate's full name",
+    '{{Candidate Email}}': "Candidate's email address",
+    '{{Job Name}}': 'Job the candidate booked, as named in Admin > Jobs',
+    '{{Company Name}}': 'EMAIL_COMPANY_NAME from .env',
+    '{{Slot Date}}': 'Day and date, e.g. Tuesday, 24-11-2026',
+    '{{Date}}': 'Date only, e.g. 24-11-2026',
+    '{{Day}}': 'Weekday, e.g. Tuesday',
+    '{{Start Time}}': 'Slot start, e.g. 10:00 AM',
+    '{{End Time}}': 'Slot end, e.g. 10:30 AM',
+    '{{Duration}}': 'Slot length, e.g. 30 Minutes',
+    '{{Assessment Link}}': "The candidate's interview link, valid for their slot",
+    '{{Unique Interview Link}}': 'Same as {{Assessment Link}}',
+    '{{Support Email}}': 'EMAIL_SUPPORT from .env, else EMAIL_REPLY_TO',
+}
+
+# Values a preview or test email is rendered with.
+SAMPLE_VALUES = {
+    'candidate_name': 'Priya Sharma',
+    'candidate_email': 'priya.sharma@example.com',
+    'job_name': 'Backend Engineer',
+    'slot_date': '24-11-2026',
+    'day_of_week': 'Tuesday',
+    'start_time': '10:00 AM',
+    'end_time': '10:30 AM',
+    'interview_link': ('https://app.fabrichq.ai/jobs/sample/?candidate_id=sample'
+                       '&start_time=2026-11-24T10:00&end_time=2026-11-24T10:30'),
+    'duration_minutes': 30,
+}
+
+
+def get_default_template():
+    """The built-in subject and body, used until one is saved."""
     filename = _cfg('CONFIRMATION_EMAIL_TEMPLATE') or DEFAULT_TEMPLATE_FILE
     with open(os.path.join(TEMPLATE_DIR, filename), encoding='utf-8') as f:
-        return f.read()
+        body = f.read()
+    return {'subject': _cfg('CONFIRMATION_EMAIL_SUBJECT') or DEFAULT_SUBJECT,
+            'body': body}
+
+
+def get_confirmation_template():
+    """The template to send: the saved one, else the default.
+
+    Read at send time, so a save in the admin panel applies to the next
+    email without a restart.
+    """
+    from database import get_setting
+    subject = get_setting(SUBJECT_SETTING)
+    body = get_setting(BODY_SETTING)
+    if subject and body:
+        return {'subject': subject, 'body': body, 'is_custom': True}
+    template = get_default_template()
+    template['is_custom'] = False
+    return template
+
+
+def find_unknown_placeholders(text):
+    """Placeholders in text that would not be filled in."""
+    return [token for token in sorted(set(re.findall(r'{{[^}]+}}', text or '')))
+            if token not in PLACEHOLDERS]
+
+
+def _sender_settings():
+    reply_to = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
+    return {
+        'company_name': _cfg('EMAIL_COMPANY_NAME', 'Fabric'),
+        'reply_to': reply_to,
+        'support_email': _cfg('EMAIL_SUPPORT', '') or reply_to,
+    }
+
+
+def build_values(candidate_name, candidate_email, job_name, slot_date,
+                 day_of_week, start_time, end_time, interview_link,
+                 duration_minutes=None, company_name=None):
+    """Placeholder values for one confirmation email."""
+    sender = _sender_settings()
+    return {
+        '{{Candidate Name}}': candidate_name,
+        '{{Candidate Email}}': candidate_email,
+        '{{Company Name}}': company_name or sender['company_name'],
+        '{{Job Name}}': job_name,
+        '{{Slot Date}}': f'{day_of_week}, {slot_date}',
+        '{{Date}}': slot_date,
+        '{{Day}}': day_of_week,
+        '{{Start Time}}': start_time,
+        '{{End Time}}': end_time,
+        '{{Duration}}': f'{duration_minutes} Minutes' if duration_minutes else '',
+        '{{Assessment Link}}': interview_link,
+        '{{Unique Interview Link}}': interview_link,
+        '{{Support Email}}': sender['support_email'],
+    }
+
+
+def _fill(text, values, escape=False):
+    """Substitute placeholders and check none were missed.
+
+    A misspelt placeholder would otherwise reach the candidate as literal
+    "{{...}}" text -- and if it were the link, with no way to join at
+    all. escape HTML-escapes values, for the body: a name with "&" or "<"
+    would otherwise break the markup. Returns (text, error).
+    """
+    for token, value in values.items():
+        value = str(value) if value else ''
+        text = text.replace(token, html.escape(value) if escape else value)
+    leftover = re.findall(r'{{[^}]+}}', text)
+    if leftover:
+        return None, f"Email template has unknown placeholders: {leftover}"
+    return text, None
+
+
+def render_email(template, values):
+    """Render a template's subject and body. Returns (subject, html, error)."""
+    subject, error = _fill(template['subject'], values)
+    if error:
+        return None, None, error
+    body, error = _fill(template['body'], values, escape=True)
+    if error:
+        return None, None, error
+    return subject, body, None
+
+
+def render_sample(template):
+    """Render a template with sample candidate data."""
+    v = SAMPLE_VALUES
+    values = build_values(v['candidate_name'], v['candidate_email'],
+                          v['job_name'], v['slot_date'], v['day_of_week'],
+                          v['start_time'], v['end_time'], v['interview_link'],
+                          v['duration_minutes'])
+    return render_email(template, values)
+
+
+def send_test_email(to_address, template):
+    """Send a template, filled with sample data, to an admin."""
+    subject, body, error = render_sample(template)
+    if error:
+        return False, error
+    sender = _sender_settings()
+    return send_raw_email(
+        mail_to=to_address,
+        subject=f'[TEST] {subject}',
+        html_content=body,
+        reply_to=[sender['reply_to']],
+        company_name=sender['company_name'],
+    )
 
 
 def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=None,
@@ -118,57 +264,26 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
     """
     Send a booking confirmation email to a candidate after they book a slot.
 
-    Every candidate-visible value is substituted into the template; nothing
-    about the slot is hardcoded in the HTML.
+    Uses the template from Admin > Email Templates, else the default.
 
     Returns: (success: bool, error_message: str | None)
     """
-    effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
-    reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
-    support_email = _cfg('EMAIL_SUPPORT', '') or reply_to_addr
-    duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
+    values = build_values(candidate_name, candidate_email, job_name,
+                          slot_date, day_of_week, start_time, end_time,
+                          interview_link_with_expiry, duration_minutes,
+                          company_name)
+    subject, html_content, error = render_email(
+        get_confirmation_template(), values)
+    if error:
+        logger.error(error)
+        print(f"[SES] ERROR: {error}")
+        return False, error
 
-    values = {
-        '{{Candidate Name}}': candidate_name,
-        '{{Candidate Email}}': candidate_email,
-        '{{Company Name}}': effective_company,
-        '{{Job Name}}': job_name,
-        '{{Slot Date}}': f'{day_of_week}, {slot_date}',
-        '{{Date}}': slot_date,
-        '{{Day}}': day_of_week,
-        '{{Start Time}}': start_time,
-        '{{End Time}}': end_time,
-        '{{Duration}}': duration_text,
-        '{{Assessment Link}}': interview_link_with_expiry,
-        '{{Unique Interview Link}}': interview_link_with_expiry,
-        '{{Support Email}}': support_email,
-        # Names used by the KOSMIC template
-        '{{Case Study Name}}': job_name,
-        '{{Unique Interaction Link}}': interview_link_with_expiry,
-    }
-
-    def fill(text):
-        for token, value in values.items():
-            text = text.replace(token, value)
-        return text
-
-    subject = fill(_cfg('CONFIRMATION_EMAIL_SUBJECT') or DEFAULT_SUBJECT)
-    html_content = fill(_load_template())
-
-    # A renamed placeholder in the template would otherwise reach the
-    # candidate as literal "{{...}}" text -- and if it were the link, with
-    # no way to join at all.
-    leftover = re.findall(r'{{[^}]+}}', subject + html_content)
-    if leftover:
-        msg = f"Email template has unsubstituted placeholders: {leftover}"
-        logger.error(msg)
-        print(f"[SES] ERROR: {msg}")
-        return False, msg
-
+    sender = _sender_settings()
     return send_raw_email(
         mail_to=candidate_email,
         subject=subject,
         html_content=html_content,
-        reply_to=[reply_to_addr],
-        company_name=effective_company,
+        reply_to=[sender['reply_to']],
+        company_name=values['{{Company Name}}'],
     )

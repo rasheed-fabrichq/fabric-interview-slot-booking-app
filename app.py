@@ -31,14 +31,19 @@ from database import (
     get_all_slots,
     create_job, update_interview_date_times,
     get_slot_config, update_slot_config,
-    update_booking_email_status, get_booking_with_details
+    update_booking_email_status, get_booking_with_details,
+    set_setting, delete_setting
 )
 from config import (
     get_jobs, is_valid_job_id, get_job_name,
     build_interview_link,
     ADMIN_USERNAME, ADMIN_PASSWORD
 )
-from email_utils import send_booking_confirmation
+from email_utils import (
+    send_booking_confirmation, get_confirmation_template,
+    find_unknown_placeholders, render_sample, send_test_email,
+    PLACEHOLDERS, SUBJECT_SETTING, BODY_SETTING
+)
 
 # Delay between a booking and its confirmation email, in seconds.
 # Override with EMAIL_CONFIRMATION_DELAY_SECONDS in .env; 0 sends
@@ -1179,6 +1184,95 @@ def admin_jobs():
 
     return render_template('admin_jobs.html', jobs=get_jobs(),
                            config=get_slot_config())
+
+
+@app.route('/admin/email-templates', methods=['GET', 'POST'])
+@admin_required
+def admin_email_templates():
+    """Edit the confirmation email: subject, HTML body and placeholders.
+
+    One template for the whole deployment, sent for every job. Until one
+    is saved here, the built-in default is used.
+    """
+    success = error = None
+    template = None  # set when a rejected save should be shown again
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'save':
+            subject = (request.form.get('subject') or '').strip()
+            body = request.form.get('body') or ''
+            unknown = find_unknown_placeholders(subject + body)
+            if not subject or not body.strip():
+                error = 'Subject and body are both required.'
+            elif unknown:
+                error = (f'Unknown placeholder(s): {", ".join(unknown)}. '
+                         f'Use only the placeholders listed beside the editor.')
+            else:
+                set_setting(SUBJECT_SETTING, subject)
+                set_setting(BODY_SETTING, body)
+                success = ('Confirmation email saved. It applies to the next '
+                           'booking, for every job.')
+            if error:
+                template = {'subject': subject, 'body': body,
+                            'is_custom': True}
+        elif action == 'reset':
+            delete_setting(SUBJECT_SETTING)
+            delete_setting(BODY_SETTING)
+            success = 'Confirmation email reset to the default template.'
+        else:
+            error = 'Unknown action'
+
+    return render_template('admin_email_templates.html',
+                           template=template or get_confirmation_template(),
+                           placeholders=PLACEHOLDERS,
+                           admin_email=ADMIN_USERNAME,
+                           success=success,
+                           error=error)
+
+
+def _template_from_json(data):
+    """The subject/body the editor posted. Returns (template, error)."""
+    template = {'subject': (data.get('subject') or '').strip(),
+                'body': data.get('body') or ''}
+    if not template['subject'] or not template['body'].strip():
+        return None, 'Subject and body are both required.'
+    unknown = find_unknown_placeholders(template['subject'] + template['body'])
+    if unknown:
+        return None, f'Unknown placeholder(s): {", ".join(unknown)}'
+    return template, None
+
+
+@app.route('/admin/email-templates/preview', methods=['POST'])
+@admin_required
+def admin_email_templates_preview():
+    """Render the editor's current, unsaved template with sample data."""
+    template, error = _template_from_json(request.get_json(silent=True) or {})
+    if not error:
+        subject, html_body, error = render_sample(template)
+    if error:
+        return jsonify({'error': error}), 400
+    return jsonify({'subject': subject, 'html': html_body})
+
+
+@app.route('/admin/email-templates/test', methods=['POST'])
+@admin_required
+def admin_email_templates_test():
+    """Send the editor's current template, with sample data, to an admin."""
+    data = request.get_json(silent=True) or {}
+    template, error = _template_from_json(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    to_address = (data.get('to') or '').strip()
+    if not is_valid_email(to_address):
+        return jsonify({'error': 'Enter a valid email address'}), 400
+
+    ok, error = send_test_email(to_address, template)
+    if not ok:
+        return jsonify({'error': error or 'Send failed'}), 502
+    return jsonify({'success': True,
+                    'message': f'Test email sent to {to_address}'})
 
 
 # Error handlers
