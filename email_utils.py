@@ -25,9 +25,9 @@ def _cfg(key, default=''):
 # default below.
 TEMPLATE_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'email_templates')
-DEFAULT_TEMPLATE_FILE = 'default_slot_confirmed.html'
-DEFAULT_SUBJECT = ('Your AI Interview is confirmed – {{Job Name}}, '
-                   '{{Slot Date}} {{Start Time}} IST')
+DEFAULT_TEMPLATE_FILE = 'sprinto_slot_confirmed.html'
+DEFAULT_SUBJECT = ('Sprinto – Your Case Study Interview Assessment Details | '
+                   '{{Slot Date}}, {{Start Time}} IST')
 
 # Settings-table keys for the saved template.
 SUBJECT_SETTING = 'confirmation_email_subject'
