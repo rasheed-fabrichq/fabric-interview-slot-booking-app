@@ -11,10 +11,8 @@
             </div>
             <div class="card-body">
                 <div class="alert alert-info">
-                    <strong>Instructions:</strong> Choose the case study your team has
-                    selected, then pick a date and a time slot.
-                    <strong>You can book only one interview</strong>, so choose your
-                    case study carefully &mdash; it cannot be changed afterwards.
+                    <strong>Instructions:</strong> Pick a date, then a time slot.
+                    Once confirmed, your booking cannot be changed.
                 </div>
 
                 <!-- Candidate Info (Read-only) -->
@@ -29,45 +27,14 @@
                     </div>
                 </div>
 
-                <!-- Job Selection -->
-                <div id="job-selection-container" class="mb-4">
-                    <h5 class="mb-3">Step 1: Select Case Study</h5>
-                    <p class="text-muted small">
-                        Choose the case study your team has selected. You may book only
-                        one interview in total.
-                    </p>
-                    <select id="job-select" class="form-select form-select-lg mb-2">
-                        <option value="">-- Select a case study --</option>
-                        {% for job in jobs %}
-                        <option value="{{ job.job_id }}" title="{{ job.job_name }}">{{ job.job_name }}</option>
-                        {% endfor %}
-                    </select>
-
-                    <!-- Full name of the current selection, since a long one is
-                         truncated inside the select control itself. -->
-                    <p id="job-select-full-name" class="text-muted small mb-3 d-none"></p>
-
-                    <button type="button" id="job-continue-btn"
-                            class="btn btn-primary btn-lg w-100" disabled>
-                        Continue
-                    </button>
-                </div>
-
-                <!-- Selected Job Display -->
-                <div id="selected-job-info" class="alert alert-success d-none mb-4">
-                    <div class="d-flex justify-content-between align-items-start gap-2">
-                        <div class="text-break">
-                            <strong>Case Study:</strong> <span id="selected-job-display"></span>
-                        </div>
-                        <button type="button" id="change-job-btn" class="btn btn-outline-secondary btn-sm flex-shrink-0">
-                            Change
-                        </button>
-                    </div>
+                <!-- Job (fixed by the booking link) -->
+                <div class="alert alert-secondary mb-4 text-break">
+                    <strong>Position:</strong> {{ job_name }}
                 </div>
 
                 <!-- Date Selection -->
-                <div id="date-selection-container" class="mb-4 d-none">
-                    <h5 class="mb-3">Step 2: Select Date</h5>
+                <div id="date-selection-container" class="mb-4">
+                    <h5 class="mb-3">Step 1: Select Date</h5>
                     <p class="text-muted small">Click on a date to view available time slots for that day.</p>
                     <div id="dates-grid" class="row g-2">
                         <!-- Dates will be loaded here via JavaScript -->
@@ -82,7 +49,7 @@
                 <!-- Slot Selection -->
                 <div id="slot-container" class="d-none">
                     <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
-                        <h5 class="mb-0">Step 3: Select Time Slot</h5>
+                        <h5 class="mb-0">Step 2: Select Time Slot</h5>
                         <button type="button" id="back-to-dates-btn" class="btn btn-outline-primary btn-sm flex-shrink-0">
                             <i class="bi bi-arrow-left"></i> Back
                         </button>
@@ -132,7 +99,7 @@
             <div class="modal-body">
                 <p id="success-message"></p>
                 <div class="alert alert-info">
-                    <strong>Case Study:</strong> <span id="modal-job-name"></span><br>
+                    <strong>Position:</strong> <span id="modal-job-name"></span><br>
                     <strong>Start Time:</strong> <span id="modal-start-time"></span><br>
                     <strong>End Time:</strong> <span id="modal-end-time"></span>
                 </div>
@@ -171,6 +138,7 @@
 
 <!-- Hidden inputs for JavaScript -->
 <input type="hidden" id="candidate-id" value="{{ candidate.candidate_id }}">
+<input type="hidden" id="job-id" value="{{ job_id }}">
 <input type="hidden" id="booking-token" value="{{ booking_token }}">
 
 {% endblock %}

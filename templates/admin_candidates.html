@@ -17,6 +17,20 @@
     </div>
 </div>
 
+<!-- Job filter -->
+<div class="row mb-3">
+    <div class="col-md-4">
+        <form method="GET" action="/admin/candidates">
+            <select name="job_id" class="form-select" onchange="this.form.submit()">
+                <option value="">All Jobs</option>
+                {% for jid, jname in jobs.items() %}
+                <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+
 <!-- Status Filter Cards -->
 <div class="row mb-4">
     <div class="col-12">
@@ -50,8 +64,9 @@
                                 <th>Name</th>
                                 <th>Email</th>
                                 <th>Status</th>
+                                <th>Job</th>
                                 <th>Candidate ID</th>
-                                <th>Booked Job / Link</th>
+                                <th>Booking Link</th>
                                 <th>Created At</th>
                             </tr>
                         </thead>
@@ -72,17 +87,14 @@
                                         <span class="badge bg-secondary">{{ candidate.status }}</span>
                                     {% endif %}
                                 </td>
+                                <td>{{ candidate.job_name }}</td>
                                 <td>
                                     <small class="text-muted font-monospace">{{ candidate.candidate_id[:8] }}...</small>
                                 </td>
                                 <td>
-                                    {% if candidate.booked_job_name %}
-                                    <span class="badge bg-info">{{ candidate.booked_job_name }}</span>
-                                    {% else %}
-                                    <a href="/book?candidate_id={{ candidate.candidate_id }}" target="_blank" class="btn btn-sm btn-outline-primary" title="Slot booking link">
+                                    <a href="/book?candidate_id={{ candidate.candidate_id }}&job_id={{ candidate.job_id }}" target="_blank" class="btn btn-sm btn-outline-primary" title="Slot booking link">
                                         <i class="bi bi-link-45deg"></i> Booking Link
                                     </a>
-                                    {% endif %}
                                 </td>
                                 <td>{{ candidate.created_at }}</td>
                             </tr>

@@ -44,11 +44,16 @@
                 <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                    <div class="alert alert-info small">
-                        <strong>Upload once for the whole drive.</strong> Candidates are
-                        not tied to a case study &mdash; each candidate picks which one
-                        they want when they open their booking link, and may book
-                        only one interview in total.
+                    <div class="mb-3">
+                        <label for="job_id" class="form-label"><strong>Job</strong></label>
+                        <select class="form-select" id="job_id" name="job_id" required>
+                            <option value="">-- Select the job these candidates applied to --</option>
+                            {% for jid, jname in jobs.items() %}
+                            <option value="{{ jid }}" {% if selected_job == jid %}selected{% endif %}>{{ jname }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Upload each job's candidates separately. All jobs
+                            share the same interview slots.</div>
                     </div>
 
                     <div class="mb-3">
@@ -63,11 +68,10 @@
                             <li>Required columns: <code>Name</code>, <code>Email</code>,
                                 <code>AI Interview Link</code>
                                 <small class="text-muted">(column names are not case-sensitive)</small></li>
-                            <li>The candidate ID is read from the
-                                <code>candidate_id</code> parameter of the AI Interview
-                                Link and must be a valid UUID</li>
-                            <li>Any job in the link is ignored &mdash; candidates choose
-                                their case study when booking</li>
+                            <li>The job ID and candidate ID are read from the AI Interview
+                                Link (<code>/jobs/&lt;JOB_UUID&gt;/?candidate_id=&lt;UUID&gt;</code>)
+                                and must be valid UUIDs</li>
+                            <li>The job ID in the link must match the selected job</li>
                         </ul>
                     </div>
 
@@ -97,9 +101,7 @@ Jane Smith,jane@example.com,https://app.fabrichq.ai/jobs/&lt;JOB_UUID&gt;/?candi
             </div>
             <div class="card-body">
                 <p class="small mb-2"><strong>After uploading, send each candidate their slot booking link:</strong></p>
-                <pre class="bg-light p-2 rounded small">{{ request.host_url|trim('/') }}/book?candidate_id=<span class="text-primary">CANDIDATE_UUID</span></pre>
-
-                <p class="small mb-2 mt-3">The link carries no case study &mdash; candidates choose it on the booking page.</p>
+                <pre class="bg-light p-2 rounded small" style="white-space: pre-wrap; word-break: break-all;">{{ booking_base_url() }}/book?candidate_id=<span class="text-primary">CANDIDATE_UUID</span>&amp;job_id=<span class="text-primary">JOB_UUID</span></pre>
 
                 <div class="alert alert-warning small mt-3 mb-0">
                     <strong>Tip:</strong> Use

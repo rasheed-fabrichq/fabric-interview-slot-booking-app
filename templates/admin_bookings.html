@@ -48,7 +48,7 @@
                                 <th>#</th>
                                 <th>Name</th>
                                 <th>Email</th>
-                                <th>Case Study</th>
+                                <th>Job</th>
                                 <th>Date</th>
                                 <th>Time</th>
                                 <th>Booked At</th>
@@ -96,6 +96,7 @@
                                             data-name="{{ booking.name }}"
                                             data-slot="{{ booking.date }} {{ booking.start_time }}"
                                             data-job-name="{{ booking.job_name }}"
+                                            data-job-id="{{ booking.job_id }}"
                                             title="Cancel this booking so the candidate can book again">
                                             <i class="bi bi-arrow-counterclockwise"></i> Allow Rebooking
                                         </button>
@@ -135,7 +136,7 @@ document.querySelectorAll('.resend-btn').forEach(function(btn) {
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Sending...';
 
-        fetch('/admin/resend-email/' + candidateId, {
+        fetch('/admin/resend-email/' + candidateId + '/' + jobId, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         })
@@ -172,6 +173,7 @@ document.querySelectorAll('.release-btn').forEach(function(btn) {
         var name = this.dataset.name;
         var slot = this.dataset.slot;
         var jobName = this.dataset.jobName;
+        var jobId = this.dataset.jobId;
         var button = this;
 
         var ok = confirm(
@@ -180,7 +182,7 @@ document.querySelectorAll('.release-btn').forEach(function(btn) {
             '  ' + jobName + '\n' +
             '  ' + slot + '\n\n' +
             'The slot is freed for other candidates and they can pick a new ' +
-            'case study and time using their original booking link.\n\n' +
+            'time using their original booking link.\n\n' +
             'They are NOT notified automatically — you will need to tell them.'
         );
         if (!ok) return;
@@ -188,7 +190,7 @@ document.querySelectorAll('.release-btn').forEach(function(btn) {
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Releasing...';
 
-        fetch('/admin/release-booking/' + candidateId, {
+        fetch('/admin/release-booking/' + candidateId + '/' + jobId, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         })

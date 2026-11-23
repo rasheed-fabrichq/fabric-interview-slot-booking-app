@@ -20,10 +20,13 @@ def get_job_name(job_id):
     jobs = get_jobs()
     return jobs.get(job_id, 'Unknown Job')
 
-# Database configuration
-# Shared-slot-pool schema. The previous per-job schema lives in
-# instance/slots.db and is left untouched for rollback.
-DATABASE_PATH = 'instance/slots_shared.db'
+import os
+
+# Database configuration. Override with DATABASE_PATH in the environment.
+# The default is a new file: instance/slots_shared.db belongs to the
+# earlier "candidates pick their job" version of this branch, whose
+# candidates table has no job_id and is refused on startup.
+DATABASE_PATH = os.environ.get('DATABASE_PATH', 'instance/slots_pool.db')
 
 # Number of interviews that can run concurrently in a single time slot,
 # counted across ALL jobs. Used as the seed value for the
@@ -38,10 +41,10 @@ DEFAULT_SLOT_START_TIME = '10:00'
 DEFAULT_SLOT_END_TIME = '18:00'
 DEFAULT_SLOT_DURATION_MINUTES = 30
 
-# Base URL used to BUILD a candidate's interview link once they pick a
-# job. Interview links are no longer uploaded -- they are constructed as:
+# Fallback base URL for a candidate's interview link. The link uploaded
+# with the candidate is used when there is one; otherwise it is built as:
 #   <INTERVIEW_LINK_BASE>/<JOB_UUID>/?candidate_id=<CANDIDATE_UUID>
-# with start_time/end_time appended for the booked window.
+# start_time/end_time are appended for the booked window either way.
 INTERVIEW_LINK_BASE = 'https://app.fabrichq.ai/jobs'
 
 # Timezone the interview schedule is expressed in. Slot dates and times
@@ -63,7 +66,7 @@ def now_local():
 
 
 def build_interview_link(job_id, candidate_id):
-    """Build the interview link for a candidate's chosen job."""
+    """Build an interview link for a candidate who has none stored."""
     return f'{INTERVIEW_LINK_BASE}/{job_id}/?candidate_id={candidate_id}'
 
 # Admin credentials (simple authentication)

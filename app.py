@@ -63,6 +63,15 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 init_database()
 
 
+@app.context_processor
+def inject_site_settings():
+    """Per-deployment values shown on every page."""
+    return {
+        'faq_link': (os.environ.get('FAQ_LINK') or '').strip(),
+        'booking_base_url': booking_base_url,
+    }
+
+
 def get_email_delay_seconds():
     """How long to wait after a booking before sending the confirmation.
 
@@ -92,7 +101,7 @@ def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, sl
     print(f"[EMAIL] Delay done. Fetching booking details for candidate={candidate_id}")
 
     try:
-        booking = get_booking_with_details(candidate_id)
+        booking = get_booking_with_details(candidate_id, job_id)
         if not booking:
             print(f"[EMAIL] ERROR: No booking found for candidate={candidate_id}. Aborting.")
             return
@@ -104,13 +113,8 @@ def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, sl
         start_time_fmt = start_dt.strftime("%I:%M %p")
         end_time_fmt = end_dt.strftime("%I:%M %p")
 
-        # The interview link is built from the job the candidate chose,
-        # not stored at upload time.
         interview_link_with_expiry = add_expiry_to_interview_link(
-            build_interview_link(booking['job_id'], candidate_id),
-            start_dt,
-            end_dt
-        )
+            interview_link_for(booking), start_dt, end_dt)
         print(f"[EMAIL] Interview link built: {interview_link_with_expiry[:80]}...")
 
         print(f"[EMAIL] Calling send_booking_confirmation for {booking['email']}...")
@@ -128,14 +132,14 @@ def send_confirmation_email_async(candidate_id, job_id, slot_date, slot_time, sl
 
         if success:
             print(f"[EMAIL] SUCCESS: Confirmation email sent to {booking['email']}")
-            update_booking_email_status(candidate_id, 'sent')
+            update_booking_email_status(candidate_id, job_id, 'sent')
         else:
             print(f"[EMAIL] FAILED: Could not send to {booking['email']}. Error: {error}")
-            update_booking_email_status(candidate_id, 'failed', error=error)
+            update_booking_email_status(candidate_id, job_id, 'failed', error=error)
 
     except Exception as e:
         print(f"[EMAIL] EXCEPTION for candidate={candidate_id}: {e}")
-        update_booking_email_status(candidate_id, 'failed', error=str(e))
+        update_booking_email_status(candidate_id, job_id, 'failed', error=str(e))
 
 
 # Admin authentication decorator
@@ -176,44 +180,72 @@ def is_valid_name(name):
     return len(name_str) > 0 and len(name_str) <= 100
 
 
-def extract_candidate_id_from_url(interview_link):
+def extract_ids_from_url(interview_link):
     """
-    Extract candidate_id from an interview link.
+    Extract candidate_id and job_id from an interview link:
+        https://app.fabrichq.ai/jobs/<JOB_UUID>/?candidate_id=<UUID>
+    /interview/ and /interviews/ paths are accepted as well.
 
-    Candidates are not uploaded per job, so any job UUID in the link's
-    path is ignored -- the candidate picks their job when booking, and the
-    real interview link is built at that point.
-
-    Returns: (candidate_id, error_message) tuple
+    Returns: (candidate_id, job_id, error_message) tuple
     """
     if interview_link is None or (not isinstance(interview_link, str) and pd.isna(interview_link)):
-        return None, "Interview link is empty"
+        return None, None, "Interview link is empty"
 
     try:
         url_str = str(interview_link).strip()
 
         if not url_str:
-            return None, "Interview link is empty"
+            return None, None, "Interview link is empty"
 
-        # Check if it's a valid URL format
         if not url_str.startswith('http://') and not url_str.startswith('https://'):
-            return None, "Invalid URL format - must start with http:// or https://"
+            return None, None, "Invalid URL format - must start with http:// or https://"
 
-        # Extract candidate_id from query parameter
+        job_match = re.search(r'/(?:jobs|interviews?)/([0-9a-fA-F-]+)/?',
+                              url_str)
+        if not job_match:
+            return None, None, "Job ID not found in URL (expected /jobs/<JOB_UUID>/)"
+        job_id = job_match.group(1).strip().lower()
+
         candidate_match = re.search(r'[?&]candidate_id=([^&]+)', url_str)
         if not candidate_match:
-            return None, "candidate_id parameter not found in URL"
-
+            return None, None, "candidate_id parameter not found in URL"
         candidate_id = candidate_match.group(1).strip()
 
-        # Validate the extracted candidate_id is a valid UUID
+        if not is_valid_uuid(job_id):
+            return None, None, f"Job ID '{job_id}' in the link is not a valid UUID"
         if not is_valid_uuid(candidate_id):
-            return None, f"Extracted candidate_id '{candidate_id}' is not a valid UUID"
+            return None, None, f"Extracted candidate_id '{candidate_id}' is not a valid UUID"
 
-        return candidate_id, None
+        return candidate_id, job_id, None
 
     except Exception as e:
-        return None, f"Error parsing URL: {str(e)}"
+        return None, None, f"Error parsing URL: {str(e)}"
+
+
+def interview_link_for(booking):
+    """The candidate's interview link: as uploaded, or built if missing."""
+    return (booking.get('interview_link')
+            or build_interview_link(booking['job_id'], booking['candidate_id']))
+
+
+def booking_base_url():
+    """Public address of this deployment, e.g. https://slot-booking.fabrichq.ai.
+
+    Set with BOOKING_BASE_URL in .env. Without it, the address the admin
+    panel is being used on is assumed -- wrong if admins reach the app
+    through a different host (an IP, localhost, plain http) than
+    candidates do.
+    """
+    base = (os.environ.get('BOOKING_BASE_URL') or '').strip()
+    if base and not base.startswith(('http://', 'https://')):
+        base = 'https://' + base
+    return (base or request.host_url).rstrip('/')
+
+
+def booking_link_for(candidate_id, job_id):
+    """The slot booking link to send a candidate."""
+    return (f"{booking_base_url()}/book"
+            f"?candidate_id={candidate_id}&job_id={job_id}")
 
 
 def add_expiry_to_interview_link(interview_link, start_datetime, end_datetime):
@@ -255,28 +287,34 @@ def index():
 def booking_form():
     """Booking form for candidates.
 
-    The link carries only candidate_id -- the candidate picks which job to
-    interview for as the first step of the flow.
+    The link names the candidate and the job they were uploaded to. The
+    slots they are offered are shared with every other job.
     """
     # Check if booking is globally enabled
     if not is_booking_enabled():
         return render_template('booking_closed.html')
 
     candidate_id = request.args.get('candidate_id')
+    job_id = request.args.get('job_id')
 
-    if not candidate_id:
+    if not candidate_id or not job_id:
         return render_template('invalid_link.html',
-                             message='Missing candidate ID in the link.')
+                             message='Missing candidate ID or job ID in the link.')
 
-    candidate = get_candidate(candidate_id)
+    if not is_valid_job_id(job_id):
+        return render_template('invalid_link.html',
+                             message='Invalid job ID in the link.')
+
+    candidate = get_candidate(candidate_id, job_id)
 
     if not candidate:
         return render_template('invalid_link.html',
                              message='Invalid booking link. Please check your email for the correct link.')
 
-    # One booking per person: if they have booked any job, they are done.
+    job_name = get_job_name(job_id)
+
     if candidate['status'] == 'booked':
-        booking = get_booking_by_candidate(candidate_id)
+        booking = get_booking_by_candidate(candidate_id, job_id)
         slot_duration = get_slot_config()['slot_duration_minutes']
 
         if booking and booking.get('start_time'):
@@ -293,29 +331,26 @@ def booking_form():
                              candidate=candidate,
                              booking=booking)
 
-    # Only jobs that are currently open for booking can be chosen
-    open_jobs = [{'job_id': jid, 'job_name': jname}
-                 for jid, jname in get_jobs().items()
-                 if is_booking_enabled_for_job(jid)]
-
-    if not open_jobs:
+    if not is_booking_enabled_for_job(job_id):
         return render_template('booking_closed.html',
-                             message='No case studies are currently open for booking.')
+                             message=f'Booking for {job_name} is currently closed.')
 
     # Update status to 'clicked' if it was 'pending'
     if candidate['status'] == 'pending':
-        update_candidate_status(candidate_id, 'clicked')
+        update_candidate_status(candidate_id, job_id, 'clicked')
 
     # Generate unique booking token for this session
     booking_token = secrets.token_urlsafe(32)
     session['booking_token'] = booking_token
     session['booking_candidate_id'] = candidate_id
+    session['booking_job_id'] = job_id
     session['booking_token_used'] = False
 
     return render_template('booking_form.html',
                          candidate=candidate,
-                         booking_token=booking_token,
-                         jobs=open_jobs)
+                         job_id=job_id,
+                         job_name=job_name,
+                         booking_token=booking_token)
 
 
 @app.route('/api/job-dates')
@@ -391,14 +426,12 @@ def confirm_booking():
     if candidate_id != session_candidate_id:
         return jsonify({'error': 'Candidate ID mismatch. Security violation detected.'}), 403
 
-    # Security Check 5: Validate the chosen job exists. The job is picked
-    # in the form rather than fixed by the link, so it is validated here
-    # rather than compared against the session.
-    if not is_valid_job_id(job_id):
-        return jsonify({'error': 'Invalid job selected.'}), 400
+    # Security Check 5: Validate job_id matches session
+    if job_id != session.get('booking_job_id'):
+        return jsonify({'error': 'Job ID mismatch. Security violation detected.'}), 403
 
     # Security Check 6: Validate candidate exists
-    candidate = get_candidate(candidate_id)
+    candidate = get_candidate(candidate_id, job_id)
     if not candidate:
         return jsonify({'error': 'Invalid candidate ID'}), 400
 
@@ -427,6 +460,7 @@ def confirm_booking():
     # Clear session data after successful booking
     session.pop('booking_token', None)
     session.pop('booking_candidate_id', None)
+    session.pop('booking_job_id', None)
     session.pop('booking_token_used', None)
 
     slot_duration = get_slot_config()['slot_duration_minutes']
@@ -501,8 +535,13 @@ def admin_dashboard():
 def admin_upload():
     """Upload candidates via CSV/Excel"""
     if request.method == 'POST':
-        # Candidates are uploaded once for the whole drive, not per job --
-        # they choose their job when booking.
+        # Candidates are uploaded per job; the link's job must match.
+        job_id = request.form.get('job_id')
+        if not job_id or not is_valid_job_id(job_id):
+            return render_template('admin_upload.html',
+                                 error='Select the job these candidates belong to.',
+                                 jobs=get_jobs())
+
         if 'file' not in request.files:
             return render_template('admin_upload.html',
                                  error='No file uploaded',
@@ -583,13 +622,17 @@ def admin_upload():
                         errors.append(f"Row {row_num}: Missing required fields: {', '.join(missing_fields)} | Row data: {row_display}")
                         continue
 
-                    # Validation 2: Extract candidate_id from the interview
-                    # link. Any job in the link is ignored -- the candidate
-                    # picks their job when booking.
-                    extracted_candidate_id, link_error = extract_candidate_id_from_url(interview_link)
+                    # Validation 2: Extract candidate_id and job_id from
+                    # the interview link; the job must be the selected one.
+                    extracted_candidate_id, link_job_id, link_error = extract_ids_from_url(interview_link)
                     if link_error:
                         error_count += 1
                         errors.append(f"Row {row_num}: {link_error} | Row data: {row_display}")
+                        continue
+
+                    if link_job_id != job_id.lower():
+                        error_count += 1
+                        errors.append(f"Row {row_num}: Job ID mismatch - link has '{link_job_id}' but the selected job is '{job_id}' | Row data: {row_display}")
                         continue
 
                     # Validation 3: Validate name
@@ -610,8 +653,10 @@ def admin_upload():
                     # All validations passed, try to add candidate
                     result = add_candidate(
                         extracted_candidate_id,
+                        job_id,
                         str(name).strip(),
-                        str(email).strip()
+                        str(email).strip(),
+                        str(interview_link).strip()
                     )
 
                     if 'success' in result:
@@ -624,7 +669,8 @@ def admin_upload():
                 os.remove(filepath)
 
                 return render_template('admin_upload.html',
-                                     success=f'{success_count} candidates uploaded successfully.',
+                                     success=f'{success_count} candidates uploaded to {get_job_name(job_id)}.',
+                                     selected_job=job_id,
                                      error=f'{error_count} errors occurred.' if error_count > 0 else None,
                                      errors=errors[:50],  # Show first 50 errors
                                      jobs=get_jobs())
@@ -883,9 +929,7 @@ def admin_export():
         )
         end_datetime = start_datetime + timedelta(minutes=slot_duration)
 
-        # Build the interview link for the job this candidate chose
-        interview_link = build_interview_link(
-            booking['job_id'], booking['candidate_id'])
+        interview_link = interview_link_for(booking)
         interview_link_with_expiry = add_expiry_to_interview_link(
             interview_link,
             start_datetime,
@@ -962,13 +1006,12 @@ def admin_candidates():
 @app.route('/admin/export-pending')
 @admin_required
 def admin_export_pending():
-    """Export candidates who have not booked yet, with their booking links.
-
-    Non-booked candidates belong to no job, so this is not job-filtered.
-    """
+    """Export candidates who have not booked yet, with their booking links."""
     status_filter = request.args.get('status', 'all')  # 'pending', 'clicked', or 'all'
+    job_id = request.args.get('job_id')  # Optional job filter
 
-    candidates = get_all_candidates()
+    candidates = get_all_candidates(
+        job_id if job_id and is_valid_job_id(job_id) else None)
 
     # Filter for non-booked candidates (pending or clicked)
     if status_filter == 'pending':
@@ -981,16 +1024,16 @@ def admin_export_pending():
     if not filtered:
         return "No candidates to export", 400
 
-    # Prepare CSV data, including the slot-booking link to send them
-    base = request.host_url.rstrip('/')
     export_data = []
     for c in filtered:
         export_data.append({
             'Name': c['name'],
             'Email': c['email'],
             'Candidate ID': c['candidate_id'],
+            'Job': c['job_name'],
+            'Job ID': c['job_id'],
             'Status': c['status'],
-            'Slot Booking Link': f"{base}/book?candidate_id={c['candidate_id']}",
+            'Slot Booking Link': booking_link_for(c['candidate_id'], c['job_id']),
         })
 
     df = pd.DataFrame(export_data)
@@ -1001,7 +1044,8 @@ def admin_export_pending():
     output.seek(0)
 
     status_suffix = f"_{status_filter}" if status_filter != 'all' else "_pending_clicked"
-    filename = f"candidates{status_suffix}.csv"
+    job_suffix = f"_{job_id}" if job_id else ""
+    filename = f"candidates{job_suffix}{status_suffix}.csv"
 
     return Response(
         output.getvalue(),
@@ -1010,51 +1054,50 @@ def admin_export_pending():
     )
 
 
-@app.route('/admin/release-booking/<candidate_id>', methods=['POST'])
+@app.route('/admin/release-booking/<candidate_id>/<job_id>', methods=['POST'])
 @admin_required
 @csrf.exempt
-def admin_release_booking(candidate_id):
+def admin_release_booking(candidate_id, job_id):
     """Cancel a candidate's booking so they can book again.
 
-    Frees the slot for everyone and lets the candidate re-use their
-    original booking link to pick a different case study or time.
+    Frees the shared slot for everyone and lets the candidate re-use
+    their original booking link to pick a different time.
     """
-    candidate = get_candidate(candidate_id)
+    candidate = get_candidate(candidate_id, job_id)
     if not candidate:
         return jsonify({'error': 'Candidate not found'}), 404
 
-    result = release_booking(candidate_id)
+    result = release_booking(candidate_id, job_id)
 
     if 'error' in result:
         return jsonify(result), 400
 
-    print(f"[ADMIN] Released booking for candidate={candidate_id} "
+    print(f"[ADMIN] Released booking for candidate={candidate_id} job={job_id} "
           f"({result['freed_date']} {result['freed_time']})")
 
-    booking_link = f"{request.host_url.rstrip('/')}/book?candidate_id={candidate_id}"
     return jsonify({
         'success': True,
         'message': (f"Booking released. {result['freed_date']} "
                     f"{result['freed_time']} is free again."),
-        'booking_link': booking_link,
+        'booking_link': booking_link_for(candidate_id, job_id),
     })
 
 
-@app.route('/admin/resend-email/<candidate_id>', methods=['POST'])
+@app.route('/admin/resend-email/<candidate_id>/<job_id>', methods=['POST'])
 @admin_required
 @csrf.exempt
-def admin_resend_email(candidate_id):
+def admin_resend_email(candidate_id, job_id):
     """Resend booking confirmation email for a specific candidate."""
-    booking = get_booking_with_details(candidate_id)
+    booking = get_booking_with_details(candidate_id, job_id)
     if not booking:
         return jsonify({'error': 'Booking not found'}), 404
 
     slot_duration = get_slot_config()['slot_duration_minutes']
 
-    print(f"[EMAIL] Admin triggered resend for candidate={candidate_id}")
+    print(f"[EMAIL] Admin triggered resend for candidate={candidate_id} job={job_id}")
     email_thread = threading.Thread(
         target=send_confirmation_email_async,
-        args=(candidate_id, booking['job_id'], booking['date'],
+        args=(candidate_id, job_id, booking['date'],
               booking['start_time'], slot_duration, 0),  # delay=0 for manual resend
         daemon=True
     )

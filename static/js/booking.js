@@ -3,9 +3,6 @@
 let selectedDate = null;
 let selectedSlotId = null;
 let selectedSlotTime = null;
-// Chosen in step 1 -- the link no longer carries a job.
-let jobId = null;
-let jobName = null;
 
 // Get DOM elements
 const datesGrid = document.getElementById('dates-grid');
@@ -20,88 +17,13 @@ const selectedSlotTimeSpan = document.getElementById('selected-slot-time');
 const confirmBookingBtn = document.getElementById('confirm-booking-btn');
 const changeDateBtn = document.getElementById('change-date-btn');
 const backToDatesBtn = document.getElementById('back-to-dates-btn');
-const jobSelectionContainer = document.getElementById('job-selection-container');
-const jobSelect = document.getElementById('job-select');
-const jobContinueBtn = document.getElementById('job-continue-btn');
-const jobSelectFullName = document.getElementById('job-select-full-name');
-const selectedJobInfo = document.getElementById('selected-job-info');
-const selectedJobDisplay = document.getElementById('selected-job-display');
-const changeJobBtn = document.getElementById('change-job-btn');
 const candidateId = document.getElementById('candidate-id').value;
 const bookingToken = document.getElementById('booking-token').value;
+// The job comes from the booking link; slots are shared across jobs.
+const jobId = document.getElementById('job-id').value;
 
-// Step 1 is choosing a position; dates load once a job is picked.
-document.addEventListener('DOMContentLoaded', function() {
-    // Continue stays disabled until a real position is chosen
-    jobSelect.addEventListener('change', function () {
-        jobContinueBtn.disabled = !this.value;
-        showFullJobName();
-    });
-
-    // Restore state if the browser repopulated the select on a back/refresh
-    showFullJobName();
-
-    jobContinueBtn.addEventListener('click', function () {
-        if (!jobSelect.value) return;
-        const option = jobSelect.options[jobSelect.selectedIndex];
-        selectJob(jobSelect.value, option.textContent.trim());
-    });
-});
-
-// A long position name is truncated inside the select control, and native
-// dropdowns ignore per-option tooltips in most browsers. So mirror the
-// current selection in full underneath, and put it on the control's own
-// title for hover.
-function showFullJobName() {
-    const name = jobSelect.value
-        ? jobSelect.options[jobSelect.selectedIndex].textContent.trim()
-        : '';
-
-    jobSelect.title = name;
-
-    if (name) {
-        jobSelectFullName.textContent = name;
-        jobSelectFullName.classList.remove('d-none');
-    } else {
-        jobSelectFullName.textContent = '';
-        jobSelectFullName.classList.add('d-none');
-    }
-}
-
-// Function to select a job and move on to dates
-function selectJob(id, name) {
-    jobId = id;
-    jobName = name;
-
-    selectedJobDisplay.textContent = name;
-    selectedJobInfo.classList.remove('d-none');
-    jobSelectionContainer.classList.add('d-none');
-    dateSelectionContainer.classList.remove('d-none');
-
-    loadDates();
-}
-
-// Go back to the position list, resetting everything downstream
-function backToJobSelection() {
-    jobId = null;
-    jobName = null;
-    selectedDate = null;
-    selectedSlotId = null;
-    selectedSlotTime = null;
-
-    selectedJobInfo.classList.add('d-none');
-    dateSelectionContainer.classList.add('d-none');
-    selectedDateInfo.classList.add('d-none');
-    slotContainer.classList.add('d-none');
-    selectedSlotInfo.style.display = 'none';
-    datesGrid.innerHTML = '';
-    slotsGrid.innerHTML = '';
-
-    // Re-arm the picker with the previous choice still shown
-    jobContinueBtn.disabled = !jobSelect.value;
-    showFullJobName();
-    jobSelectionContainer.classList.remove('d-none');
-}
+// Step 1 is choosing a date
+document.addEventListener('DOMContentLoaded', loadDates);
 
 // Function to load available dates for the job
 function loadDates() {
@@ -201,9 +123,6 @@ changeDateBtn.addEventListener('click', backToDateSelection);
 
 // Event listener for "Back to Dates" button (shown in slot selection screen)
 backToDatesBtn.addEventListener('click', backToDateSelection);
-
-// Change position -- resets date and slot selection too
-changeJobBtn.addEventListener('click', backToJobSelection);
 
 // Function to load available slots for a specific date
 function loadSlots(jobId, date) {
@@ -328,11 +247,6 @@ function selectSlot(slotId, slotTime, cardEl) {
 
 // Event listener for confirm booking button
 confirmBookingBtn.addEventListener('click', function() {
-    if (!jobId) {
-        showError('Please select a case study.');
-        return;
-    }
-
     if (!selectedSlotId) {
         showError('Please select a time slot.');
         return;

@@ -18,19 +18,21 @@ def _cfg(key, default=''):
 
 
 # The confirmation email body lives in email_templates/ so the markup can
-# be edited without touching Python. Placeholder names must match the
-# substitutions in send_booking_confirmation below.
-TEMPLATE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'email_templates', 'kosmic_slot_confirmed.html')
+# be edited without touching Python. Pick the file per deployment with
+# CONFIRMATION_EMAIL_TEMPLATE in .env. Placeholders it may use are the
+# keys substituted in send_booking_confirmation below.
+TEMPLATE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'email_templates')
+DEFAULT_TEMPLATE_FILE = 'default_slot_confirmed.html'
+DEFAULT_SUBJECT = ('Your AI Interview is confirmed – {{Job Name}}, '
+                   '{{Slot Date}} {{Start Time}} IST')
 
 
 def _load_template():
-    with open(TEMPLATE_PATH, encoding='utf-8') as f:
+    """Read the template at send time, so .env changes need no restart."""
+    filename = _cfg('CONFIRMATION_EMAIL_TEMPLATE') or DEFAULT_TEMPLATE_FILE
+    with open(os.path.join(TEMPLATE_DIR, filename), encoding='utf-8') as f:
         return f.read()
-
-
-CONFIRMATION_EMAIL_TEMPLATE = _load_template()
 
 
 def send_raw_email(mail_to, subject, html_content, reply_to=None, company_name=None,
@@ -123,26 +125,40 @@ def send_booking_confirmation(candidate_name, candidate_email, job_name,
     """
     effective_company = company_name or _cfg('EMAIL_COMPANY_NAME', 'Fabric')
     reply_to_addr = _cfg('EMAIL_REPLY_TO', 'support@fabrichq.ai')
+    support_email = _cfg('EMAIL_SUPPORT', '') or reply_to_addr
     duration_text = f'{duration_minutes} Minutes' if duration_minutes else ''
-    subject = (f"CONFIRMED: Your KOSMIC AI Interaction – "
-               f"{slot_date} {start_time} IST")
 
-    html_content = CONFIRMATION_EMAIL_TEMPLATE
-    for token, value in (
-        ('{{Candidate Name}}', candidate_name),
-        ('{{Case Study Name}}', job_name),
-        ('{{Slot Date}}', f'{day_of_week}, {slot_date}'),
-        ('{{Start Time}}', start_time),
-        ('{{End Time}}', end_time),
-        ('{{Duration}}', duration_text),
-        ('{{Unique Interaction Link}}', interview_link_with_expiry),
-    ):
-        html_content = html_content.replace(token, value)
+    values = {
+        '{{Candidate Name}}': candidate_name,
+        '{{Candidate Email}}': candidate_email,
+        '{{Company Name}}': effective_company,
+        '{{Job Name}}': job_name,
+        '{{Slot Date}}': f'{day_of_week}, {slot_date}',
+        '{{Date}}': slot_date,
+        '{{Day}}': day_of_week,
+        '{{Start Time}}': start_time,
+        '{{End Time}}': end_time,
+        '{{Duration}}': duration_text,
+        '{{Assessment Link}}': interview_link_with_expiry,
+        '{{Unique Interview Link}}': interview_link_with_expiry,
+        '{{Support Email}}': support_email,
+        # Names used by the KOSMIC template
+        '{{Case Study Name}}': job_name,
+        '{{Unique Interaction Link}}': interview_link_with_expiry,
+    }
+
+    def fill(text):
+        for token, value in values.items():
+            text = text.replace(token, value)
+        return text
+
+    subject = fill(_cfg('CONFIRMATION_EMAIL_SUBJECT') or DEFAULT_SUBJECT)
+    html_content = fill(_load_template())
 
     # A renamed placeholder in the template would otherwise reach the
     # candidate as literal "{{...}}" text -- and if it were the link, with
     # no way to join at all.
-    leftover = re.findall(r'{{[^}]+}}', html_content)
+    leftover = re.findall(r'{{[^}]+}}', subject + html_content)
     if leftover:
         msg = f"Email template has unsubstituted placeholders: {leftover}"
         logger.error(msg)
